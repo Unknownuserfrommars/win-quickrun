@@ -12,13 +12,14 @@ import os
 import re
 import shutil
 import sys
+import time
 
 if sys.platform != "win32":
     sys.exit("quickrun only works on Windows.")
 
 import winreg
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
@@ -66,14 +67,22 @@ def resolve_alias(alias: str):
     return None, None
 
 
-def normalize_alias(alias: str) -> str:
+def _clean_alias(alias: str):
+    """Return the normalized alias, or None if it's invalid."""
     alias = alias.strip().lower()
     if alias.endswith(".exe"):
         alias = alias[:-4]
     if not alias or any(c in alias for c in ' \\/:*?"<>|'):
+        return None
+    return alias
+
+
+def normalize_alias(alias: str) -> str:
+    cleaned = _clean_alias(alias)
+    if cleaned is None:
         sys.exit(f'[!] "{alias}" is not a valid alias '
                  "(no spaces or \\ / : * ? \" < > | characters).")
-    return alias
+    return cleaned
 
 
 # ---------------------------------------------------------------- commands
@@ -267,6 +276,174 @@ def cmd_quickstart(args) -> None:
           "Try Win+R and type one of them.")
 
 
+# ---------------------------------------------------------------- find
+
+_UNINSTALL_KEYS = [
+    (winreg.HKEY_LOCAL_MACHINE,
+     r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_LOCAL_MACHINE,
+     r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_CURRENT_USER,
+     r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+]
+
+# Directories that are huge and never contain user-facing exes.
+_SKIP_DIRS = {
+    "windows", "winsxs", "temp", "tmp", "cache", "caches", "logs",
+    "node_modules", "__pycache__", "packages", "assembly", "installer",
+    "servicing", "locales", "resources", "$recycle.bin",
+}
+
+# (root, max scan depth) - deeper where installs actually live.
+def _search_roots():
+    roots = [
+        (os.environ.get("ProgramFiles", r"C:\Program Files"), 4),
+        (os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), 4),
+        (os.path.expandvars(r"%LocalAppData%\Programs"), 4),
+        (os.path.expandvars(r"%AppData%"), 3),
+        (os.path.expandvars(r"%LocalAppData%"), 3),
+        (os.path.expandvars(r"%UserProfile%\scoop\apps"), 3),
+        (os.environ.get("ProgramData", r"C:\ProgramData"), 2),
+    ]
+    return [(r, d) for r, d in roots if r and os.path.isdir(r)]
+
+
+def _find_candidates(query: str, budget: float = 10.0):
+    """Return (exact_hits, partial_hits) for query, fast-paths first."""
+    query = query.strip().lower()
+    if not query.endswith(".exe"):
+        query += ".exe"
+    stem = query[:-4]
+    deadline = time.time() + budget
+
+    exact, partial, seen = [], [], set()
+
+    def add(bucket, path):
+        path = os.path.abspath(path.strip('"'))
+        key = os.path.normcase(path)
+        if key not in seen and os.path.isfile(path):
+            seen.add(key)
+            bucket.append(path)
+
+    # 1. App Paths entries (instant).
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        target = _read_default(root, rf"{APP_PATHS}\{query}")
+        if target:
+            add(exact, target)
+
+    # 2. Installer registry: DisplayIcon usually points at the main exe.
+    for root, base in _UNINSTALL_KEYS:
+        try:
+            with winreg.OpenKey(root, base) as key:
+                names = [winreg.EnumKey(key, i)
+                         for i in range(winreg.QueryInfoKey(key)[0])]
+        except OSError:
+            continue
+        for name in names:
+            try:
+                with winreg.OpenKey(root, rf"{base}\{name}") as sub:
+                    icon, _ = winreg.QueryValueEx(sub, "DisplayIcon")
+            except OSError:
+                continue
+            exe = icon.split(",")[0].strip().strip('"')
+            base_name = os.path.basename(exe).lower()
+            if base_name == query:
+                add(exact, exe)
+            elif base_name.endswith(".exe") and stem in base_name:
+                add(partial, exe)
+
+    # 3. PATH.
+    on_path = shutil.which(query)
+    if on_path:
+        add(exact, on_path)
+
+    # 4. Depth-limited scan of the usual install locations.
+    for root, max_depth in _search_roots():
+        stack = [(root, 0)]
+        while stack:
+            if time.time() > deadline:
+                return exact, partial, True
+            path, depth = stack.pop()
+            try:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        try:
+                            name = entry.name.lower()
+                            if entry.is_file():
+                                if name == query:
+                                    add(exact, entry.path)
+                                elif name.endswith(".exe") and stem in name:
+                                    add(partial, entry.path)
+                            elif (depth < max_depth
+                                  and name not in _SKIP_DIRS
+                                  and entry.is_dir(follow_symlinks=False)):
+                                stack.append((entry.path, depth + 1))
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+
+    return exact, partial, False
+
+
+def cmd_find(args) -> None:
+    query = args.name.strip()
+    print(f'Searching for "{query}" ...')
+    start = time.time()
+    exact, partial, timed_out = _find_candidates(query)
+    elapsed = time.time() - start
+
+    hits = exact or partial[:10]
+    label = "" if exact else " (no exact match; closest names)"
+    note = ", search budget hit - results may be incomplete" if timed_out else ""
+    print(f"{len(hits)} result(s) in {elapsed:.1f}s{label}{note}\n")
+
+    if not hits:
+        print("Nothing found. Tips: use the real exe name (e.g. winword, "
+              "not word),\nor bind the path directly: quickrun bind <path> <alias>")
+        return
+
+    if len(hits) == 1:
+        chosen = hits[0]
+        print(f"  Found: {chosen}")
+    else:
+        for i, path in enumerate(hits, 1):
+            print(f"  [{i}] {path}")
+        try:
+            answer = input(f"\nWhich one? [1-{len(hits)}, Enter to cancel] ").strip()
+        except EOFError:
+            answer = ""
+        if not answer:
+            print("Cancelled.")
+            return
+        try:
+            chosen = hits[int(answer) - 1]
+        except (ValueError, IndexError):
+            sys.exit(f'[!] "{answer}" is not a number between 1 and {len(hits)}.')
+
+    while True:
+        try:
+            raw = input("Alias to bind it to (press Enter to skip): ").strip()
+        except EOFError:
+            raw = ""
+        if not raw:
+            print("Skipped - nothing was bound.")
+            return
+        alias = _clean_alias(raw)
+        if alias is None:
+            print(f'  "{raw}" is not valid (no spaces or \\ / : * ? " < > |). '
+                  "Try again.")
+            continue
+        existing, source = resolve_alias(alias)
+        if existing:
+            print(f'  "{alias}" already resolves to {existing} via {source}. '
+                  "Pick another name.")
+            continue
+        _write_binding(alias, chosen)
+        print(f'[OK] Win+R -> "{alias}" now opens {chosen}')
+        return
+
+
 # ---------------------------------------------------------------- update
 
 def _version_tuple(version: str):
@@ -347,7 +524,20 @@ _COMMAND_ALIASES = {
     "-list": "list", "-l": "list", "l": "list", "ls": "list",
     "-quickstart": "quickstart", "-q": "quickstart", "qs": "quickstart",
     "--update": "update", "-U": "update", "-update": "update", "up": "update",
+    "-find": "find", "--find": "find", "f": "find",
 }
+
+
+def _pause_if_own_console() -> None:
+    """When launched from Win+R/Explorer, the console vanishes the moment
+    we exit - if it's ours alone, wait so the help stays readable."""
+    try:
+        import ctypes
+        pids = (ctypes.c_uint * 2)()
+        if ctypes.windll.kernel32.GetConsoleProcessList(pids, 2) <= 1:
+            input("\nPress Enter to close...")
+    except Exception:
+        pass
 
 
 def main() -> None:
@@ -395,6 +585,12 @@ def main() -> None:
                       help="rebind aliases that already exist")
     p_qs.set_defaults(func=cmd_quickstart)
 
+    p_find = sub.add_parser(
+        "find", help="search the computer for an exe and offer to bind it")
+    p_find.add_argument("name", help='program to look for, e.g. "obsidian" '
+                                     'or "everything.exe"')
+    p_find.set_defaults(func=cmd_find)
+
     p_update = sub.add_parser(
         "update", help="update quickrun.exe to the latest GitHub release")
     p_update.set_defaults(func=cmd_update)
@@ -402,6 +598,7 @@ def main() -> None:
     args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
+        _pause_if_own_console()
         return
     args.func(args)
 

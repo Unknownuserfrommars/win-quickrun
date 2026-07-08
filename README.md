@@ -67,6 +67,7 @@ quickrun bind <path\to\app.exe> <alias>     # bind an alias
 quickrun -b <path\to\app.exe> -a <alias>    # same thing, flag style
 quickrun list                               # show your bindings
 quickrun unbind <alias>                     # remove one
+quickrun find <name>                        # search the PC for an exe, offer to bind
 quickrun quickstart                         # auto-detect installed apps
 quickrun update                             # self-update from GitHub (also: -U)
 quickrun --version                          # print version
@@ -79,6 +80,24 @@ quickrun bind "C:\Program Files (x86)\Microsoft Office\Root\Office16\WINWORD.EXE
 quickrun -b "D:\Tools\Everything\Everything.exe" -a ev
 quickrun bind "%LocalAppData%\Programs\obsidian\Obsidian.exe" notes
 ```
+
+### Find: locate an exe you don't know the path of
+
+```
+> quickrun find obsidian
+Searching for "obsidian" ...
+1 result(s) in 1.2s
+
+  Found: C:\Users\you\AppData\Local\Programs\obsidian\Obsidian.exe
+Alias to bind it to (press Enter to skip): notes
+[OK] Win+R -> "notes" now opens C:\Users\you\...\Obsidian.exe
+```
+
+`find` checks the registry (App Paths + installer records) first,
+then scans the usual install folders with a depth limit and a hard
+~10s time budget — typically it answers in 1-3 seconds. Multiple
+matches show a numbered list to pick from; pressing Enter at any
+prompt skips without binding.
 
 ### Quickstart: auto-detect installed apps
 
@@ -111,6 +130,7 @@ unless you pass `--force`.
 | `unbind <alias>` | `u`, `-u`, `-unbind` | `-f/--force` also remove entries quickrun didn't create |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` include installer-created user entries |
 | `quickstart` | `qs`, `-q`, `-quickstart` | `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `find <name>` | `f`, `-find`, `--find` | interactive; Enter skips |
 | `update` | `up`, `-U`, `--update` | (standalone exe only) |
 | `--version` | `-V` | |
 
@@ -141,6 +161,14 @@ you `unbind` them. The one thing that can break an alias is the
 target app moving or being uninstalled; just rebind if that happens.
 
 **Do I need admin rights?** No. Everything is per-user (HKCU).
+
+**Does launching go through cmd.exe? I saw a console flash.**
+No — Win+R resolves the alias and starts the target exe directly;
+no shell is involved. GUI apps open with no console at all. A brief
+console window only appears if the alias points at a *console*
+program (that window **is** the program), or if you launch
+`quickrun` itself from Win+R (it's a CLI tool; it now keeps its
+window open so the help is readable).
 
 **Can an alias shadow a built-in name?**
 Yes — HKCU wins over HKLM, so you *could* make `notepad` open
