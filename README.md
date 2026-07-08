@@ -1,5 +1,7 @@
 # quickrun
 
+[简体中文](README_zh_CN.md)
+
 **Bind custom Win+R aliases to any Windows program.**
 
 Windows lets you launch `notepad` or `powershell` straight from
