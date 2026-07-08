@@ -21,15 +21,28 @@ Then **Win+R → `word` → Enter**. That's it.
 
 ## Install
 
-### Option 1: standalone exe (recommended)
+### Option 1: one-liner (recommended)
 
-Grab `quickrun.exe` from [Releases](../../releases) (or build it
-yourself, see below), drop it somewhere permanent, and add that
-folder to your PATH. Or let the script do all of that:
+Paste into any PowerShell window:
 
 ```powershell
-.\install.ps1
+irm https://raw.githubusercontent.com/Unknownuserfrommars/quickrun/main/install.ps1 | iex
 ```
+
+This downloads the latest release exe to
+`%LocalAppData%\Programs\quickrun` and adds it to your PATH — no
+admin prompt, and `quickrun update` can later update itself in place.
+
+Prefer a machine-wide install in `C:\Program Files`? Run from an
+elevated shell in a clone of the repo:
+
+```powershell
+.\install.ps1 -SystemWide
+```
+
+(Not the default because Program Files needs admin rights for every
+future self-update.) You can also just grab `quickrun.exe` from
+[Releases](../../releases) and manage it yourself, yt-dlp style.
 
 ### Option 2: pip
 
@@ -53,6 +66,8 @@ quickrun -b <path\to\app.exe> -a <alias>    # same thing, flag style
 quickrun list                               # show your bindings
 quickrun unbind <alias>                     # remove one
 quickrun quickstart                         # auto-detect installed apps
+quickrun update                             # self-update from GitHub (also: -U)
+quickrun --version                          # print version
 ```
 
 ### Examples
@@ -94,6 +109,8 @@ unless you pass `--force`.
 | `unbind <alias>` | `u`, `-u`, `-unbind` | `-f/--force` also remove entries quickrun didn't create |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` include installer-created user entries |
 | `quickstart` | `qs`, `-q`, `-quickstart` | `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `update` | `up`, `-U`, `--update` | (standalone exe only) |
+| `--version` | `-V` | |
 
 Alias rules: case-insensitive, no spaces, no `\ / : * ? " < > |`.
 A trailing `.exe` is stripped automatically.
@@ -127,6 +144,11 @@ target app moving or being uninstalled; just rebind if that happens.
 Yes — HKCU wins over HKLM, so you *could* make `notepad` open
 something else for your account. That's why binding over an existing
 name requires `--force`.
+
+**How do I update?**
+`quickrun update` (or `quickrun -U`) checks the latest GitHub
+release and replaces the exe in place. If you installed via pip,
+use `git pull` + `pip install -e .` instead.
 
 **How do I remove everything?**
 `quickrun list` to see your bindings, then `quickrun unbind <alias>`

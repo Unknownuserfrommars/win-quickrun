@@ -9,12 +9,17 @@ marker value so it never deletes bindings it didn't create.
 
 import argparse
 import os
+import re
+import shutil
 import sys
 
 if sys.platform != "win32":
     sys.exit("quickrun only works on Windows.")
 
 import winreg
+
+__version__ = "0.2.0"
+GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
 MARKER = "QuickRunManaged"
@@ -55,7 +60,6 @@ def resolve_alias(alias: str):
         if target:
             return target, source
     # Things like notepad/powershell resolve through the system PATH.
-    import shutil
     on_path = shutil.which(alias)
     if on_path:
         return on_path, "system PATH"
@@ -263,6 +267,77 @@ def cmd_quickstart(args) -> None:
           "Try Win+R and type one of them.")
 
 
+# ---------------------------------------------------------------- update
+
+def _version_tuple(version: str):
+    return tuple(int(x) for x in re.findall(r"\d+", version)[:3])
+
+
+def cmd_update(args) -> None:
+    """Self-update by downloading quickrun.exe from the latest release.
+
+    A running exe on Windows can be renamed but not overwritten, so the
+    current file is parked as quickrun.exe.old and cleaned up next run.
+    """
+    if not getattr(sys, "frozen", False):
+        sys.exit("[!] update only works for the standalone quickrun.exe.\n"
+                 "    Running from source? Use: git pull")
+
+    import json
+    import urllib.request
+
+    def fetch(url, **kw):
+        req = urllib.request.Request(url, headers={"User-Agent": "quickrun"})
+        return urllib.request.urlopen(req, **kw)
+
+    api = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    try:
+        with fetch(api, timeout=15) as resp:
+            release = json.load(resp)
+    except OSError as exc:
+        sys.exit(f"[!] Could not check for updates: {exc}")
+
+    latest = release.get("tag_name", "v0")
+    if _version_tuple(latest) <= _version_tuple(__version__):
+        print(f"[OK] quickrun {__version__} is up to date.")
+        return
+
+    asset = next((a for a in release.get("assets", [])
+                  if a["name"].lower() == "quickrun.exe"), None)
+    if not asset:
+        sys.exit(f"[!] Release {latest} has no quickrun.exe attached.")
+
+    exe = sys.executable
+    print(f"Updating {__version__} -> {latest.lstrip('v')} ...")
+    tmp = exe + ".new"
+    try:
+        with fetch(asset["browser_download_url"], timeout=120) as resp, \
+                open(tmp, "wb") as out:
+            shutil.copyfileobj(resp, out)
+    except OSError as exc:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        sys.exit(f"[!] Download failed: {exc}")
+
+    old = exe + ".old"
+    if os.path.exists(old):
+        os.remove(old)
+    os.rename(exe, old)
+    os.rename(tmp, exe)
+    print(f"[OK] Updated to {latest.lstrip('v')}. "
+          "(leftover .old file is removed on next run)")
+
+
+def _cleanup_old_exe() -> None:
+    if getattr(sys, "frozen", False):
+        old = sys.executable + ".old"
+        if os.path.exists(old):
+            try:
+                os.remove(old)
+            except OSError:
+                pass  # previous version still shutting down; next run gets it
+
+
 # ---------------------------------------------------------------- cli
 
 # Accept the single-dash spelling too: quickrun -bind ... / -b ...
@@ -271,10 +346,12 @@ _COMMAND_ALIASES = {
     "-unbind": "unbind", "-u": "unbind", "u": "unbind",
     "-list": "list", "-l": "list", "l": "list", "ls": "list",
     "-quickstart": "quickstart", "-q": "quickstart", "qs": "quickstart",
+    "--update": "update", "-U": "update", "-update": "update", "up": "update",
 }
 
 
 def main() -> None:
+    _cleanup_old_exe()
     argv = sys.argv[1:]
     if argv and argv[0] in _COMMAND_ALIASES:
         argv[0] = _COMMAND_ALIASES[argv[0]]
@@ -284,6 +361,8 @@ def main() -> None:
         description="Bind custom Win+R aliases to any program. "
                     "No admin rights needed; changes apply instantly.",
     )
+    parser.add_argument("-V", "--version", action="version",
+                        version=f"quickrun {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     p_bind = sub.add_parser("bind", help="bind an alias to an exe")
@@ -315,6 +394,10 @@ def main() -> None:
     p_qs.add_argument("-f", "--force", action="store_true",
                       help="rebind aliases that already exist")
     p_qs.set_defaults(func=cmd_quickstart)
+
+    p_update = sub.add_parser(
+        "update", help="update quickrun.exe to the latest GitHub release")
+    p_update.set_defaults(func=cmd_update)
 
     args = parser.parse_args(argv)
     if not args.command:
