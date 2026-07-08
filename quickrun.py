@@ -19,11 +19,13 @@ if sys.platform != "win32":
 
 import winreg
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
 MARKER = "QuickRunManaged"
+SOURCE_MARKER = "QuickRunSource"
+ALIAS_OF_MARKER = "QuickRunAliasOf"
 
 
 # ---------------------------------------------------------------- registry
@@ -32,23 +34,51 @@ def _subkey(alias: str) -> str:
     return rf"{APP_PATHS}\{alias}.exe"
 
 
-def _read_default(root, subkey):
-    """Return the default value of a key, or None if the key is missing."""
+def _read_value(root, subkey, name):
+    """Return a registry value, or None if the key/value is missing."""
     try:
         with winreg.OpenKey(root, subkey) as key:
-            value, _ = winreg.QueryValueEx(key, "")
+            value, _ = winreg.QueryValueEx(key, name)
             return value
     except OSError:
         return None
 
 
+def _read_default(root, subkey):
+    """Return the default value of a key, or None if the key is missing."""
+    return _read_value(root, subkey, "")
+
+
 def _is_managed(alias: str) -> bool:
+    return _read_value(winreg.HKEY_CURRENT_USER, _subkey(alias), MARKER) is not None
+
+
+def _binding_source(alias: str):
+    return _read_value(winreg.HKEY_CURRENT_USER, _subkey(alias), SOURCE_MARKER)
+
+
+def _user_bindings():
+    rows = []
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _subkey(alias)) as key:
-            winreg.QueryValueEx(key, MARKER)
-            return True
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, APP_PATHS) as key:
+            count = winreg.QueryInfoKey(key)[0]
+            names = [winreg.EnumKey(key, i) for i in range(count)]
     except OSError:
-        return False
+        names = []
+
+    for name in names:
+        alias = name[:-4] if name.lower().endswith(".exe") else name
+        target = _read_default(winreg.HKEY_CURRENT_USER, rf"{APP_PATHS}\{name}")
+        rows.append((alias, target or "(no target)",
+                     _is_managed(alias), _binding_source(alias)))
+    return rows
+
+
+def _delete_value_if_present(key, name) -> None:
+    try:
+        winreg.DeleteValue(key, name)
+    except OSError:
+        pass
 
 
 def resolve_alias(alias: str):
@@ -103,28 +133,152 @@ def cmd_bind(args) -> None:
         sys.exit(f'[!] "{alias}" already resolves to {existing} '
                  f"via {source}{managed}. Use --force to overwrite.")
 
-    _write_binding(alias, exe)
+    _write_binding(alias, exe, source="bind")
     print(f'[OK] Win+R -> "{alias}" now opens {exe}')
 
 
-def _write_binding(alias: str, exe: str) -> None:
+def _write_binding(alias: str, exe: str, source: str = "bind",
+                   alias_of: str = None) -> None:
     with winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER, _subkey(alias), 0, winreg.KEY_SET_VALUE
     ) as key:
         winreg.SetValueEx(key, "", 0, winreg.REG_SZ, exe)
         winreg.SetValueEx(key, "Path", 0, winreg.REG_SZ, os.path.dirname(exe))
         winreg.SetValueEx(key, MARKER, 0, winreg.REG_SZ, "1")
+        winreg.SetValueEx(key, SOURCE_MARKER, 0, winreg.REG_SZ, source)
+        _delete_value_if_present(key, ALIAS_OF_MARKER)
+        if alias_of:
+            winreg.SetValueEx(key, ALIAS_OF_MARKER, 0, winreg.REG_SZ, alias_of)
 
 
-def cmd_unbind(args) -> None:
-    alias = normalize_alias(args.alias)
+def _resolve_command_target(command: str):
+    maybe_path = os.path.abspath(os.path.expandvars(os.path.expanduser(command)))
+    if os.path.isfile(maybe_path):
+        return maybe_path, "path"
+
+    cleaned = _clean_alias(command)
+    if cleaned is None:
+        sys.exit(f'[!] "{command}" is not a command name or existing file.')
+
+    target, source = resolve_alias(cleaned)
+    if not target:
+        sys.exit(f'[!] "{command}" does not resolve through App Paths or PATH.')
+
+    target = os.path.abspath(
+        os.path.expandvars(os.path.expanduser(target.strip('"')))
+    )
+    if not os.path.isfile(target):
+        sys.exit(f'[!] "{command}" resolves to {target}, but that file '
+                 "does not exist.")
+    return target, source
+
+
+def _delete_binding(alias: str, force: bool = False):
     target = _read_default(winreg.HKEY_CURRENT_USER, _subkey(alias))
     if target is None:
-        sys.exit(f'[!] No user-level binding for "{alias}".')
-    if not _is_managed(alias) and not args.force:
+        return None
+    if not _is_managed(alias) and not force:
         sys.exit(f'[!] "{alias}" exists but was not created by quickrun. '
                  "Use --force to delete it anyway.")
     winreg.DeleteKey(winreg.HKEY_CURRENT_USER, _subkey(alias))
+    return target
+
+
+def _print_remove_plan(rows, heading: str) -> None:
+    print(heading)
+    width = max(len(r[0]) for r in rows)
+    for alias, target, managed, source in sorted(rows):
+        tags = []
+        if not managed:
+            tags.append("external")
+        elif source:
+            tags.append(source)
+        tag = f"  [{', '.join(tags)}]" if tags else ""
+        print(f"  {alias:<{width}}  ->  {target}{tag}")
+
+
+def _remove_many(rows, args, empty_message: str) -> None:
+    if not rows:
+        print(empty_message)
+        return
+
+    _print_remove_plan(rows, "Will remove:")
+    if args.dry_run:
+        print("\n(dry run - nothing deleted)")
+        return
+
+    if not args.yes:
+        answer = input(f"\nDelete {len(rows)} binding(s)? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Cancelled.")
+            return
+
+    for alias, _, _, _ in rows:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, _subkey(alias))
+    print(f"\n[OK] Removed {len(rows)} binding(s).")
+
+
+def cmd_alias(args) -> None:
+    new_alias = normalize_alias(args.new_alias)
+    old_display = args.old_cmd
+    target, source = _resolve_command_target(args.old_cmd)
+
+    if _clean_alias(args.old_cmd) == new_alias:
+        sys.exit("[!] old_cmd and new_alias are the same.")
+
+    existing, existing_source = resolve_alias(new_alias)
+    if existing and not args.force:
+        managed = " (created by quickrun)" if _is_managed(new_alias) else ""
+        sys.exit(f'[!] "{new_alias}" already resolves to {existing} '
+                 f"via {existing_source}{managed}. Use --force to overwrite.")
+
+    _write_binding(new_alias, target, source="alias", alias_of=old_display)
+    print(f'[OK] Win+R -> "{new_alias}" now opens {target} '
+          f'(alias of "{old_display}" via {source})')
+
+
+def cmd_del_alias(args) -> None:
+    alias = normalize_alias(args.alias)
+    target = _read_default(winreg.HKEY_CURRENT_USER, _subkey(alias))
+    source = _binding_source(alias)
+
+    if args.dry_run:
+        if target is None:
+            print(f'[dry run] No user-level binding for "{alias}".')
+        elif not args.force and source != "alias":
+            print(f'[dry run] Would not remove "{alias}" because it was not '
+                  "created by quickrun alias.")
+        else:
+            print(f'[dry run] Would remove "{alias}" -> {target}')
+        return
+
+    if target is None:
+        sys.exit(f'[!] No user-level binding for "{alias}".')
+    if not args.force and source != "alias":
+        sys.exit(f'[!] "{alias}" was not created by quickrun alias. '
+                 "Use quickrun unbind instead, or --force.")
+    target = _delete_binding(alias, args.force)
+    print(f'[OK] Removed alias "{alias}" (was {target})')
+
+
+def cmd_unbind(args) -> None:
+    if args.alias.strip().lower() == "all":
+        rows = [row for row in _user_bindings() if row[2] or args.force]
+        _remove_many(rows, args, "No quickrun-managed bindings to remove.")
+        return
+
+    alias = normalize_alias(args.alias)
+    if args.dry_run:
+        target = _read_default(winreg.HKEY_CURRENT_USER, _subkey(alias))
+        if target is None:
+            print(f'[dry run] No user-level binding for "{alias}".')
+        else:
+            print(f'[dry run] Would remove "{alias}" -> {target}')
+        return
+
+    target = _delete_binding(alias, args.force)
+    if target is None:
+        sys.exit(f'[!] No user-level binding for "{alias}".')
     print(f'[OK] Removed "{alias}" (was {target})')
 
 
@@ -182,58 +336,223 @@ def _from_paths(*candidates):
     return find
 
 
+def _from_commands(*commands):
+    """Find a command already on PATH."""
+    def find():
+        for command in commands:
+            path = shutil.which(command)
+            if path and os.path.isfile(path):
+                return path
+        return None
+    return find
+
+
+def _first_found(*finders):
+    def find():
+        for finder in finders:
+            path = finder()
+            if path:
+                return path
+        return None
+    return find
+
+
 PF = r"%ProgramFiles%"
 PF86 = r"%ProgramFiles(x86)%"
 LOCAL = r"%LocalAppData%"
 ROAM = r"%AppData%"
 
+QUICKSTART_CATEGORIES = [
+    ("work", "Working", "Word, Excel, PowerPoint, Outlook, OneNote, Access"),
+    ("browsers", "Browsers", "Chrome, Firefox"),
+    ("coding", "Coding & AI", "VS Code, Notepad++, Claude, Codex, Cursor"),
+    ("utilities", "Utilities", "7-Zip"),
+    ("media", "Media & Games", "VLC, Steam, Spotify"),
+    ("chat", "Chat", "Telegram, WeChat, QQ"),
+]
+
 QUICKSTART_APPS = [
-    # (display name, aliases, finder)
-    ("Microsoft Word",       ["word", "msword"],   _from_app_paths("winword.exe")),
-    ("Microsoft Excel",      ["excel"],            _from_app_paths("excel.exe")),
-    ("Microsoft PowerPoint", ["powerpoint", "ppt"], _from_app_paths("powerpnt.exe")),
-    ("Microsoft Outlook",    ["outlook"],          _from_app_paths("outlook.exe")),
-    ("Microsoft OneNote",    ["onenote"],          _from_app_paths("onenote.exe")),
-    ("Microsoft Access",     ["access"],           _from_app_paths("msaccess.exe")),
-    ("Google Chrome",        ["chrome"],
+    # (category, display name, aliases, finder)
+    ("work", "Microsoft Word",       ["word", "msword"],   _from_app_paths("winword.exe")),
+    ("work", "Microsoft Excel",      ["excel"],            _from_app_paths("excel.exe")),
+    ("work", "Microsoft PowerPoint", ["powerpoint", "ppt"], _from_app_paths("powerpnt.exe")),
+    ("work", "Microsoft Outlook",    ["outlook"],          _from_app_paths("outlook.exe")),
+    ("work", "Microsoft OneNote",    ["onenote"],          _from_app_paths("onenote.exe")),
+    ("work", "Microsoft Access",     ["access"],           _from_app_paths("msaccess.exe")),
+    ("browsers", "Google Chrome",    ["chrome"],
         _from_paths(rf"{PF}\Google\Chrome\Application\chrome.exe",
                     rf"{PF86}\Google\Chrome\Application\chrome.exe",
                     rf"{LOCAL}\Google\Chrome\Application\chrome.exe")),
-    ("Mozilla Firefox",      ["firefox"],
+    ("browsers", "Mozilla Firefox",  ["firefox"],
         _from_paths(rf"{PF}\Mozilla Firefox\firefox.exe")),
-    ("VS Code",              ["vscode"],
+    ("coding", "VS Code",            ["vscode"],
         _from_paths(rf"{LOCAL}\Programs\Microsoft VS Code\Code.exe",
                     rf"{PF}\Microsoft VS Code\Code.exe")),
-    ("Notepad++",            ["npp"],
+    ("coding", "Notepad++",          ["npp"],
         _from_paths(rf"{PF}\Notepad++\notepad++.exe",
                     rf"{PF86}\Notepad++\notepad++.exe")),
-    ("7-Zip",                ["7z"],
+    ("coding", "Claude",             ["claude"],
+        _first_found(_from_app_paths("claude.exe"),
+                     _from_paths(rf"{LOCAL}\AnthropicClaude\Claude.exe",
+                                 rf"{LOCAL}\Programs\Claude\Claude.exe",
+                                 rf"{PF}\Claude\Claude.exe"),
+                     _from_commands("claude", "claude.exe", "claude.cmd"))),
+    ("coding", "Codex",              ["codex"],
+        _first_found(_from_app_paths("codex.exe"),
+                     _from_commands("codex", "codex.exe", "codex.cmd"))),
+    ("coding", "Cursor",             ["cursor"],
+        _from_paths(rf"{LOCAL}\Programs\Cursor\Cursor.exe",
+                    rf"{PF}\Cursor\Cursor.exe")),
+    ("utilities", "7-Zip",           ["7z"],
         _from_paths(rf"{PF}\7-Zip\7zFM.exe")),
-    ("VLC",                  ["vlc"],
+    ("media", "VLC",                 ["vlc"],
         _from_paths(rf"{PF}\VideoLAN\VLC\vlc.exe",
                     rf"{PF86}\VideoLAN\VLC\vlc.exe")),
-    ("Steam",                ["steam"],
+    ("media", "Steam",               ["steam"],
         _from_paths(rf"{PF86}\Steam\steam.exe", rf"{PF}\Steam\steam.exe")),
-    ("Spotify",              ["spotify"],
+    ("media", "Spotify",             ["spotify"],
         _from_paths(rf"{ROAM}\Spotify\Spotify.exe")),
-    ("Telegram",             ["telegram", "tg"],
+    ("chat", "Telegram",             ["telegram", "tg"],
         _from_paths(rf"{ROAM}\Telegram Desktop\Telegram.exe")),
-    ("WeChat",               ["wechat", "wx"],
+    ("chat", "WeChat",               ["wechat", "wx"],
         _from_paths(rf"{PF}\Tencent\Weixin\Weixin.exe",
                     rf"{PF}\Tencent\WeChat\WeChat.exe",
                     rf"{PF86}\Tencent\WeChat\WeChat.exe")),
-    ("QQ",                   ["qq"],
+    ("chat", "QQ",                   ["qq"],
         _from_paths(rf"{PF}\Tencent\QQNT\QQ.exe",
                     rf"{PF86}\Tencent\QQ\Bin\QQ.exe")),
 ]
 
 
-def cmd_quickstart(args) -> None:
-    print("Scanning for installed apps...\n")
+_CANCELLED = object()
+
+
+def _quickstart_category_keys():
+    return [key for key, _, _ in QUICKSTART_CATEGORIES]
+
+
+def _quickstart_apps(categories=None):
+    selected = set(categories) if categories is not None else None
+    for category, display, aliases, find in QUICKSTART_APPS:
+        if selected is None or category in selected:
+            yield category, display, aliases, find
+
+
+_ANSI = {
+    "reset": "\x1b[0m",
+    "bold": "\x1b[1m",
+    "dim": "\x1b[2m",
+    "cyan": "\x1b[36m",
+    "green": "\x1b[32m",
+    "yellow": "\x1b[33m",
+    "reverse": "\x1b[7m",
+    "clear": "\x1b[2J\x1b[H",
+    "hide": "\x1b[?25l",
+    "show": "\x1b[?25h",
+}
+
+
+def _enable_ansi() -> None:
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+    except Exception:
+        pass
+
+
+def _read_key():
+    import msvcrt
+    ch = msvcrt.getwch()
+    if ch in ("\x00", "\xe0"):
+        code = msvcrt.getwch()
+        return {"H": "up", "P": "down", "K": "left", "M": "right"}.get(code)
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == " ":
+        return "space"
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    return ch.lower()
+
+
+def _draw_quickstart_picker(index, selected, title) -> None:
+    out = sys.stdout
+    out.write(_ANSI["clear"])
+    out.write(_ANSI["hide"])
+    out.write(f'{_ANSI["bold"]}{_ANSI["cyan"]}quickrun quickstart{_ANSI["reset"]}\n')
+    out.write(f"{title}\n\n")
+    out.write("Space toggles, Up/Down moves, Enter continues, "
+              "A toggles all, Q cancels.\n\n")
+
+    for i, (key, label, description) in enumerate(QUICKSTART_CATEGORIES):
+        active = i == index
+        checked = key in selected
+        cursor = ">" if active else " "
+        box = "x" if checked else " "
+        color = _ANSI["reverse"] if active else ""
+        tick = _ANSI["green"] if checked else _ANSI["dim"]
+        out.write(f"{color}{cursor} {tick}[{box}]{_ANSI['reset']} "
+                  f"{label:<14} {description}{_ANSI['reset']}\n")
+
+    out.write(f"\n{_ANSI['yellow']}{len(selected)} area(s) selected"
+              f"{_ANSI['reset']}\n")
+    out.flush()
+
+
+def _select_quickstart_categories(initial=None, title="Select app areas"):
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        sys.exit("[!] --ui needs an interactive console.")
+
+    selected = set(initial) if initial is not None else set(_quickstart_category_keys())
+    index = 0
+    _enable_ansi()
+    try:
+        while True:
+            _draw_quickstart_picker(index, selected, title)
+            key = _read_key()
+            if key == "up":
+                index = (index - 1) % len(QUICKSTART_CATEGORIES)
+            elif key == "down":
+                index = (index + 1) % len(QUICKSTART_CATEGORIES)
+            elif key == "space":
+                category = QUICKSTART_CATEGORIES[index][0]
+                if category in selected:
+                    selected.remove(category)
+                else:
+                    selected.add(category)
+            elif key == "a":
+                all_keys = set(_quickstart_category_keys())
+                selected = set() if selected == all_keys else all_keys
+            elif key == "enter":
+                return selected
+            elif key in ("q", "\x1b"):
+                return None
+    except KeyboardInterrupt:
+        return None
+    finally:
+        sys.stdout.write(_ANSI["show"] + _ANSI["reset"] + "\n")
+        sys.stdout.flush()
+
+
+def _selected_quickstart_categories(args, title):
+    initial = set(args.area) if args.area else None
+    if args.ui:
+        selected = _select_quickstart_categories(initial, title)
+        return _CANCELLED if selected is None else selected
+    if args.area:
+        return initial
+    return None
+
+
+def _build_quickstart_plan(args, categories=None):
     plan = []      # (alias, exe, display)
     skipped = []   # (alias, reason)
 
-    for display, aliases, find in QUICKSTART_APPS:
+    for _, display, aliases, find in _quickstart_apps(categories):
         exe = find()
         if not exe:
             continue
@@ -246,6 +565,22 @@ def cmd_quickstart(args) -> None:
                     skipped.append((alias, f"already taken via {source}"))
                 continue
             plan.append((alias, exe, display))
+    return plan, skipped
+
+
+def cmd_quickstart(args) -> None:
+    categories = _selected_quickstart_categories(
+        args, "Select the app areas quickstart should scan."
+    )
+    if categories is _CANCELLED:
+        print("Cancelled.")
+        return
+    if categories == set():
+        print("No app areas selected.")
+        return
+
+    print("Scanning for installed apps...\n")
+    plan, skipped = _build_quickstart_plan(args, categories)
 
     if plan:
         width = max(len(a) for a, _, _ in plan)
@@ -271,7 +606,7 @@ def cmd_quickstart(args) -> None:
             return
 
     for alias, exe, _ in plan:
-        _write_binding(alias, exe)
+        _write_binding(alias, exe, source="quickstart")
     print(f"\n[OK] {len(plan)} alias(es) bound. "
           "Try Win+R and type one of them.")
 
@@ -311,6 +646,8 @@ def _search_roots():
 def _find_candidates(query: str, budget: float = 10.0):
     """Return (exact_hits, partial_hits) for query, fast-paths first."""
     query = query.strip().lower()
+    if not query:
+        return [], [], False
     if not query.endswith(".exe"):
         query += ".exe"
     stem = query[:-4]
@@ -319,7 +656,9 @@ def _find_candidates(query: str, budget: float = 10.0):
     exact, partial, seen = [], [], set()
 
     def add(bucket, path):
-        path = os.path.abspath(path.strip('"'))
+        path = os.path.abspath(
+            os.path.expandvars(os.path.expanduser(path.strip('"')))
+        )
         key = os.path.normcase(path)
         if key not in seen and os.path.isfile(path):
             seen.add(key)
@@ -388,6 +727,8 @@ def _find_candidates(query: str, budget: float = 10.0):
 
 def cmd_find(args) -> None:
     query = args.name.strip()
+    if not query:
+        sys.exit("[!] Missing name. Usage: quickrun find <name>")
     print(f'Searching for "{query}" ...')
     start = time.time()
     exact, partial, timed_out = _find_candidates(query)
@@ -439,7 +780,7 @@ def cmd_find(args) -> None:
             print(f'  "{alias}" already resolves to {existing} via {source}. '
                   "Pick another name.")
             continue
-        _write_binding(alias, chosen)
+        _write_binding(alias, chosen, source="find")
         print(f'[OK] Win+R -> "{alias}" now opens {chosen}')
         return
 
@@ -525,6 +866,8 @@ _COMMAND_ALIASES = {
     "-quickstart": "quickstart", "-q": "quickstart", "qs": "quickstart",
     "--update": "update", "-U": "update", "-update": "update", "up": "update",
     "-find": "find", "--find": "find", "f": "find",
+    "-alias": "alias", "--alias": "alias", "a": "alias",
+    "-del_alias": "del_alias", "--del_alias": "del_alias", "da": "del_alias",
 }
 
 
@@ -564,10 +907,30 @@ def main() -> None:
                         help="overwrite an existing binding")
     p_bind.set_defaults(func=cmd_bind)
 
+    p_alias = sub.add_parser("alias",
+                             help="make a permanent alias for a command")
+    p_alias.add_argument("old_cmd", help="existing command, alias, or exe path")
+    p_alias.add_argument("new_alias", help="new name to type into Win+R")
+    p_alias.add_argument("-f", "--force", action="store_true",
+                         help="overwrite an existing binding")
+    p_alias.set_defaults(func=cmd_alias)
+
+    p_del_alias = sub.add_parser("del_alias", help="remove a quickrun alias")
+    p_del_alias.add_argument("alias")
+    p_del_alias.add_argument("-f", "--force", action="store_true",
+                             help="also delete entries quickrun didn't create")
+    p_del_alias.add_argument("-n", "--dry-run", action="store_true",
+                             help="show what would be removed")
+    p_del_alias.set_defaults(func=cmd_del_alias)
+
     p_unbind = sub.add_parser("unbind", help="remove a binding")
-    p_unbind.add_argument("alias")
+    p_unbind.add_argument("alias", help='alias to remove, or "all"')
     p_unbind.add_argument("-f", "--force", action="store_true",
                           help="also delete entries quickrun didn't create")
+    p_unbind.add_argument("-n", "--dry-run", action="store_true",
+                          help="show what would be removed")
+    p_unbind.add_argument("-y", "--yes", action="store_true",
+                          help='do not ask before "unbind all"')
     p_unbind.set_defaults(func=cmd_unbind)
 
     p_list = sub.add_parser("list", help="show current bindings")
@@ -583,6 +946,11 @@ def main() -> None:
                       help="only show what would be bound")
     p_qs.add_argument("-f", "--force", action="store_true",
                       help="rebind aliases that already exist")
+    p_qs.add_argument("--ui", action="store_true",
+                      help="choose app areas with an interactive UI")
+    p_qs.add_argument("--area", action="append",
+                      choices=_quickstart_category_keys(),
+                      help="limit quickstart to an app area; can repeat")
     p_qs.set_defaults(func=cmd_quickstart)
 
     p_find = sub.add_parser(

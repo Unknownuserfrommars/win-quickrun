@@ -65,10 +65,14 @@ python quickrun.py <command> ...
 ```
 quickrun bind <path\to\app.exe> <alias>     # bind an alias
 quickrun -b <path\to\app.exe> -a <alias>    # same thing, flag style
+quickrun alias <old_cmd> <new_alias>        # alias an existing command
 quickrun list                               # show your bindings
 quickrun unbind <alias>                     # remove one
+quickrun unbind all                         # remove all quickrun-managed bindings
+quickrun del_alias <alias>                  # remove a quickrun alias
 quickrun find <name>                        # search the PC for an exe, offer to bind
 quickrun quickstart                         # auto-detect installed apps
+quickrun quickstart --ui                    # choose app areas interactively
 quickrun update                             # self-update from GitHub (also: -U)
 quickrun --version                          # print version
 ```
@@ -78,8 +82,21 @@ quickrun --version                          # print version
 ```
 quickrun bind "C:\Program Files (x86)\Microsoft Office\Root\Office16\WINWORD.EXE" word
 quickrun -b "D:\Tools\Everything\Everything.exe" -a ev
+quickrun alias powershell ps
 quickrun bind "%LocalAppData%\Programs\obsidian\Obsidian.exe" notes
 ```
+
+### Alias: rename something Windows already knows
+
+```
+quickrun alias winword word
+quickrun alias powershell ps
+quickrun del_alias ps
+```
+
+`alias` resolves the old command through App Paths or PATH, then writes a
+new permanent user-level App Paths entry. It refuses to overwrite existing
+names unless you pass `--force`.
 
 ### Find: locate an exe you don't know the path of
 
@@ -103,33 +120,40 @@ prompt skips without binding.
 
 ```
 quickrun quickstart            # scan, show the plan, ask before writing
+quickrun quickstart --ui       # pick app areas with Space + Up/Down
+quickrun quickstart --area coding --area work
 quickrun quickstart --dry-run  # only show what would be bound
 quickrun quickstart --yes      # bind everything without asking
 ```
 
 Quickstart detects common apps and proposes friendly aliases:
 
-| App | Aliases |
-|---|---|
-| Word / Excel / PowerPoint / Outlook / OneNote / Access | `word` `msword` / `excel` / `powerpoint` `ppt` / `outlook` / `onenote` / `access` |
-| Chrome / Firefox | `chrome` / `firefox` |
-| VS Code / Notepad++ | `vscode` / `npp` |
-| 7-Zip / VLC | `7z` / `vlc` |
-| Steam / Spotify | `steam` / `spotify` |
-| Telegram / WeChat / QQ | `telegram` `tg` / `wechat` `wx` / `qq` |
+| Area | Apps | Aliases |
+|---|---|---|
+| Working | Word / Excel / PowerPoint / Outlook / OneNote / Access | `word` `msword` / `excel` / `powerpoint` `ppt` / `outlook` / `onenote` / `access` |
+| Browsers | Chrome / Firefox | `chrome` / `firefox` |
+| Coding & AI | VS Code / Notepad++ / Claude / Codex / Cursor | `vscode` / `npp` / `claude` / `codex` / `cursor` |
+| Utilities | 7-Zip | `7z` |
+| Media & Games | VLC / Steam / Spotify | `vlc` / `steam` / `spotify` |
+| Chat | Telegram / WeChat / QQ | `telegram` `tg` / `wechat` `wx` / `qq` |
 
 Names that already mean something on your system (e.g. `excel` if
 Office registered it machine-wide) are skipped, never overwritten —
 unless you pass `--force`.
+
+`--ui` opens a small keyboard interface: Up/Down moves, Space toggles
+an area, Enter continues, `A` toggles all areas, and `Q` cancels.
 
 ## Command reference
 
 | Command | Aliases | Options |
 |---|---|---|
 | `bind <exe> <alias>` | `b`, `-b`, `-bind` | `-a/--alias` (flag-style alias), `-f/--force` overwrite existing |
-| `unbind <alias>` | `u`, `-u`, `-unbind` | `-f/--force` also remove entries quickrun didn't create |
+| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `-f/--force` overwrite existing |
+| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | `-n/--dry-run`, `-f/--force` |
+| `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` also remove entries quickrun didn't create |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` include installer-created user entries |
-| `quickstart` | `qs`, `-q`, `-quickstart` | `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
 | `find <name>` | `f`, `-find`, `--find` | interactive; Enter skips |
 | `update` | `up`, `-U`, `--update` | (standalone exe only) |
 | `--version` | `-V` | |
@@ -181,8 +205,8 @@ release and replaces the exe in place. If you installed via pip,
 use `git pull` + `pip install -e .` instead.
 
 **How do I remove everything?**
-`quickrun list` to see your bindings, then `quickrun unbind <alias>`
-for each. quickrun stores nothing anywhere else.
+`quickrun unbind all` removes every quickrun-managed binding after
+confirmation. quickrun stores nothing anywhere else.
 
 ## Building the exe
 

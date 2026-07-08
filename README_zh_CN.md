@@ -64,10 +64,14 @@ python quickrun.py <command> ...
 ```
 quickrun bind <path\to\app.exe> <alias>     # 绑定一个别名
 quickrun -b <path\to\app.exe> -a <alias>    # 同样操作，参数风格
+quickrun alias <old_cmd> <new_alias>        # 为已有命令创建新别名
 quickrun list                               # 显示你的绑定
 quickrun unbind <alias>                     # 移除一个绑定
+quickrun unbind all                         # 移除所有 quickrun 管理的绑定
+quickrun del_alias <alias>                  # 移除一个 quickrun 别名
 quickrun find <name>                        # 在电脑上搜索 exe 并询问是否绑定
 quickrun quickstart                         # 自动检测已安装应用
+quickrun quickstart --ui                    # 交互式选择应用分类
 quickrun update                             # 从 GitHub 自更新（也可用：-U）
 quickrun --version                          # 打印版本号
 ```
@@ -77,8 +81,20 @@ quickrun --version                          # 打印版本号
 ```
 quickrun bind "C:\Program Files (x86)\Microsoft Office\Root\Office16\WINWORD.EXE" word
 quickrun -b "D:\Tools\Everything\Everything.exe" -a ev
+quickrun alias powershell ps
 quickrun bind "%LocalAppData%\Programs\obsidian\Obsidian.exe" notes
 ```
+
+### Alias：给 Windows 已经认识的命令换个短名
+
+```
+quickrun alias winword word
+quickrun alias powershell ps
+quickrun del_alias ps
+```
+
+`alias` 会通过 App Paths 或 PATH 解析旧命令，然后写入一个新的永久用户级
+App Paths 条目。除非传入 `--force`，否则它不会覆盖已有名称。
 
 ### Find：定位你不知道路径的 exe
 
@@ -101,32 +117,39 @@ Alias to bind it to (press Enter to skip): notes
 
 ```
 quickrun quickstart            # 扫描，显示计划，写入前请求确认
+quickrun quickstart --ui       # 用 Space + Up/Down 选择应用分类
+quickrun quickstart --area coding --area work
 quickrun quickstart --dry-run  # 只显示将要绑定的内容
 quickrun quickstart --yes      # 不询问，直接绑定全部内容
 ```
 
 Quickstart 会检测常见应用，并建议友好的别名：
 
-| 应用 | 别名 |
-|---|---|
-| Word / Excel / PowerPoint / Outlook / OneNote / Access | `word` `msword` / `excel` / `powerpoint` `ppt` / `outlook` / `onenote` / `access` |
-| Chrome / Firefox | `chrome` / `firefox` |
-| VS Code / Notepad++ | `vscode` / `npp` |
-| 7-Zip / VLC | `7z` / `vlc` |
-| Steam / Spotify | `steam` / `spotify` |
-| Telegram / WeChat / QQ | `telegram` `tg` / `wechat` `wx` / `qq` |
+| 分类 | 应用 | 别名 |
+|---|---|---|
+| Working | Word / Excel / PowerPoint / Outlook / OneNote / Access | `word` `msword` / `excel` / `powerpoint` `ppt` / `outlook` / `onenote` / `access` |
+| Browsers | Chrome / Firefox | `chrome` / `firefox` |
+| Coding & AI | VS Code / Notepad++ / Claude / Codex / Cursor | `vscode` / `npp` / `claude` / `codex` / `cursor` |
+| Utilities | 7-Zip | `7z` |
+| Media & Games | VLC / Steam / Spotify | `vlc` / `steam` / `spotify` |
+| Chat | Telegram / WeChat / QQ | `telegram` `tg` / `wechat` `wx` / `qq` |
 
 如果某个名称在你的系统中已经有含义（例如 Office 已经在机器范围内注册了
 `excel`），quickrun 会跳过它，绝不会覆盖，除非你传入 `--force`。
+
+`--ui` 会打开一个小型键盘界面：Up/Down 移动，Space 切换分类，
+Enter 继续，`A` 切换全部分类，`Q` 取消。
 
 ## 命令参考
 
 | 命令 | 别名 | 选项 |
 |---|---|---|
 | `bind <exe> <alias>` | `b`, `-b`, `-bind` | `-a/--alias`（参数风格别名），`-f/--force` 覆盖已有项 |
-| `unbind <alias>` | `u`, `-u`, `-unbind` | `-f/--force` 同时移除非 quickrun 创建的条目 |
+| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `-f/--force` 覆盖已有项 |
+| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | `-n/--dry-run`, `-f/--force` |
+| `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` 同时移除非 quickrun 创建的条目 |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` 包含安装程序创建的用户条目 |
-| `quickstart` | `qs`, `-q`, `-quickstart` | `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
 | `find <name>` | `f`, `-find`, `--find` | 交互式；按 Enter 跳过 |
 | `update` | `up`, `-U`, `--update` | （仅独立 exe 可用） |
 | `--version` | `-V` | |
@@ -172,8 +195,8 @@ Win+R 中启动了 `quickrun` 本身（它是命令行工具；现在它会保�
 并就地替换 exe。如果你通过 pip 安装，请改用 `git pull` + `pip install -e .`。
 
 **如何移除所有内容？**
-先运行 `quickrun list` 查看你的绑定，然后对每个别名执行
-`quickrun unbind <alias>`。quickrun 不会在其他地方存储任何内容。
+`quickrun unbind all` 会在确认后移除所有 quickrun 管理的绑定。
+quickrun 不会在其他地方存储任何内容。
 
 ## 构建 exe
 
