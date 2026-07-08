@@ -19,7 +19,7 @@ if sys.platform != "win32":
 
 import winreg
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
@@ -218,13 +218,131 @@ def _remove_many(rows, args, empty_message: str) -> None:
     print(f"\n[OK] Removed {len(rows)} binding(s).")
 
 
+# --------------------------------------------- terminal (PowerShell) aliases
+
+PROFILE_MARK = "# QuickRunManaged"
+_PROFILE_LINE = re.compile(
+    r"^\s*Set-Alias\s+-Name\s+(\S+)\s+-Value\s+'((?:[^']|'')*)'\s*"
+    + re.escape(PROFILE_MARK) + r"\s*$",
+    re.IGNORECASE,
+)
+
+
+def _documents_dir() -> str:
+    # The Documents folder is often redirected (OneDrive); the registry
+    # has the real location.
+    val = _read_value(
+        winreg.HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+        "Personal",
+    )
+    if val:
+        return os.path.expandvars(val)
+    return os.path.expandvars(r"%UserProfile%\Documents")
+
+
+def _profile_paths():
+    """profile.ps1 for both Windows PowerShell 5.1 and PowerShell 7+."""
+    docs = _documents_dir()
+    return [os.path.join(docs, "WindowsPowerShell", "profile.ps1"),
+            os.path.join(docs, "PowerShell", "profile.ps1")]
+
+
+def _read_profile(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    for encoding in ("utf-8-sig", "mbcs"):
+        try:
+            return data.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    sys.exit(f"[!] Could not decode {path}; edit it manually.")
+
+
+def _profile_aliases(path):
+    """Return {alias: value} for quickrun-managed Set-Alias lines."""
+    if not os.path.isfile(path):
+        return {}
+    text, _ = _read_profile(path)
+    found = {}
+    for line in text.splitlines():
+        match = _PROFILE_LINE.match(line)
+        if match:
+            found[match.group(1).lower()] = match.group(2).replace("''", "'")
+    return found
+
+
+def _is_alias_line(line: str, alias: str) -> bool:
+    match = _PROFILE_LINE.match(line)
+    return bool(match) and match.group(1).lower() == alias
+
+
+def _add_cmd_alias(alias: str, value: str) -> None:
+    quoted = value.replace("'", "''")
+    line = f"Set-Alias -Name {alias} -Value '{quoted}' {PROFILE_MARK}"
+    for path in _profile_paths():
+        if os.path.isfile(path):
+            text, encoding = _read_profile(path)
+            lines = [l for l in text.splitlines()
+                     if not _is_alias_line(l, alias)]
+            lines.append(line)
+            content = "\n".join(lines) + "\n"
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            content, encoding = line + "\n", "utf-8-sig"
+        with open(path, "w", encoding=encoding) as f:
+            f.write(content)
+
+
+def _remove_cmd_alias(alias: str):
+    """Delete the managed Set-Alias line; return profiles it was removed from."""
+    removed = []
+    for path in _profile_paths():
+        if alias not in _profile_aliases(path):
+            continue
+        text, encoding = _read_profile(path)
+        lines = [l for l in text.splitlines() if not _is_alias_line(l, alias)]
+        content = "\n".join(lines)
+        with open(path, "w", encoding=encoding) as f:
+            f.write(content + "\n" if content else "")
+        removed.append(path)
+    return removed
+
+
+def _cmd_alias_exists(alias: str) -> bool:
+    return any(alias in _profile_aliases(p) for p in _profile_paths())
+
+
 def cmd_alias(args) -> None:
     new_alias = normalize_alias(args.new_alias)
     old_display = args.old_cmd
-    target, source = _resolve_command_target(args.old_cmd)
 
     if _clean_alias(args.old_cmd) == new_alias:
         sys.exit("[!] old_cmd and new_alias are the same.")
+
+    if args.cmd:
+        # Terminal alias: persisted as a Set-Alias line in the PowerShell
+        # profiles, which run at every shell startup (Set-Alias alone
+        # only lasts for one session).
+        if shutil.which(args.old_cmd):
+            value = args.old_cmd  # on PATH; keep the name, survives moves
+        else:
+            # Terminals don't resolve App Paths names - pin the full path.
+            value, _ = _resolve_command_target(args.old_cmd)
+        conflict = shutil.which(new_alias)
+        if conflict and not args.force:
+            sys.exit(f'[!] "{new_alias}" is already a command ({conflict}). '
+                     "Use --force to shadow it.")
+        if _cmd_alias_exists(new_alias) and not args.force:
+            sys.exit(f'[!] Terminal alias "{new_alias}" already exists. '
+                     "Use --force to replace it.")
+        _add_cmd_alias(new_alias, value)
+        print(f'[OK] Terminal alias "{new_alias}" -> {value} added to your '
+              "PowerShell profiles.\n     Takes effect in NEW terminal "
+              "windows (or run: . $PROFILE)")
+        return
+
+    target, source = _resolve_command_target(args.old_cmd)
 
     existing, existing_source = resolve_alias(new_alias)
     if existing and not args.force:
@@ -238,27 +356,43 @@ def cmd_alias(args) -> None:
 
 
 def cmd_del_alias(args) -> None:
+    """Removes a quickrun alias of either kind: Win+R or terminal."""
     alias = normalize_alias(args.alias)
     target = _read_default(winreg.HKEY_CURRENT_USER, _subkey(alias))
     source = _binding_source(alias)
+    reg_removable = target is not None and (args.force or source == "alias")
+    has_cmd = _cmd_alias_exists(alias)
 
     if args.dry_run:
-        if target is None:
-            print(f'[dry run] No user-level binding for "{alias}".')
-        elif not args.force and source != "alias":
-            print(f'[dry run] Would not remove "{alias}" because it was not '
-                  "created by quickrun alias.")
-        else:
-            print(f'[dry run] Would remove "{alias}" -> {target}')
+        if reg_removable:
+            print(f'[dry run] Would remove Win+R alias "{alias}" -> {target}')
+        elif target is not None:
+            print(f'[dry run] Would not remove Win+R binding "{alias}" - it '
+                  "was not created by quickrun alias (use unbind, or --force).")
+        if has_cmd:
+            print(f'[dry run] Would remove terminal alias "{alias}" from '
+                  "your PowerShell profiles.")
+        if target is None and not has_cmd:
+            print(f'[dry run] No alias named "{alias}".')
         return
 
-    if target is None:
-        sys.exit(f'[!] No user-level binding for "{alias}".')
-    if not args.force and source != "alias":
-        sys.exit(f'[!] "{alias}" was not created by quickrun alias. '
-                 "Use quickrun unbind instead, or --force.")
-    target = _delete_binding(alias, args.force)
-    print(f'[OK] Removed alias "{alias}" (was {target})')
+    removed_any = False
+    if reg_removable:
+        _delete_binding(alias, args.force)
+        print(f'[OK] Removed Win+R alias "{alias}" (was {target})')
+        removed_any = True
+    if has_cmd:
+        for path in _remove_cmd_alias(alias):
+            print(f'[OK] Removed terminal alias "{alias}" from {path}')
+        print("     Open terminals keep it until restarted "
+              f"(or run: Remove-Alias {alias})")
+        removed_any = True
+
+    if not removed_any:
+        if target is not None:
+            sys.exit(f'[!] "{alias}" was not created by quickrun alias. '
+                     "Use quickrun unbind instead, or --force.")
+        sys.exit(f'[!] No alias named "{alias}".')
 
 
 def cmd_unbind(args) -> None:
@@ -298,15 +432,28 @@ def cmd_list(args) -> None:
         if managed or args.all:
             rows.append((alias, target or "(no target)", managed))
 
-    if not rows:
+    cmd_aliases = {}
+    for path in _profile_paths():
+        for alias, value in _profile_aliases(path).items():
+            cmd_aliases[alias] = value
+
+    if not rows and not cmd_aliases:
         print("No bindings yet. Try: quickrun bind <path\\to\\app.exe> <alias>")
         print("Or auto-detect installed apps: quickrun quickstart")
         return
 
-    width = max(len(r[0]) for r in rows)
-    for alias, target, managed in sorted(rows):
-        tag = "" if managed else "  [external]"
-        print(f"  {alias:<{width}}  ->  {target}{tag}")
+    if rows:
+        width = max(len(r[0]) for r in rows)
+        for alias, target, managed in sorted(rows):
+            tag = "" if managed else "  [external]"
+            print(f"  {alias:<{width}}  ->  {target}{tag}")
+
+    if cmd_aliases:
+        print("\nTerminal aliases (PowerShell profiles):")
+        width = max(len(a) for a in cmd_aliases)
+        for alias, value in sorted(cmd_aliases.items()):
+            print(f"  {alias:<{width}}  ->  {value}")
+
     if not args.all:
         print("\n(only quickrun-managed bindings shown; use --all for every "
               "user-level App Paths entry)")
@@ -911,6 +1058,9 @@ def main() -> None:
                              help="make a permanent alias for a command")
     p_alias.add_argument("old_cmd", help="existing command, alias, or exe path")
     p_alias.add_argument("new_alias", help="new name to type into Win+R")
+    p_alias.add_argument("--cmd", action="store_true",
+                         help="make a terminal (PowerShell) alias instead of "
+                              "a Win+R one, persisted via your profile")
     p_alias.add_argument("-f", "--force", action="store_true",
                          help="overwrite an existing binding")
     p_alias.set_defaults(func=cmd_alias)

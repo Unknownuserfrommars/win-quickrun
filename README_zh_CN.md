@@ -65,6 +65,7 @@ python quickrun.py <command> ...
 quickrun bind <path\to\app.exe> <alias>     # 绑定一个别名
 quickrun -b <path\to\app.exe> -a <alias>    # 同样操作，参数风格
 quickrun alias <old_cmd> <new_alias>        # 为已有命令创建新别名
+quickrun alias --cmd <old_cmd> <new_alias>  # 改为创建终端（PowerShell）别名
 quickrun list                               # 显示你的绑定
 quickrun unbind <alias>                     # 移除一个绑定
 quickrun unbind all                         # 移除所有 quickrun 管理的绑定
@@ -95,6 +96,21 @@ quickrun del_alias ps
 
 `alias` 会通过 App Paths 或 PATH 解析旧命令，然后写入一个新的永久用户级
 App Paths 条目。除非传入 `--force`，否则它不会覆盖已有名称。
+
+### 终端别名：`alias --cmd`
+
+Win+R 别名在终端中不起作用（shell 不读取 App Paths）。为此提供了 `--cmd`：
+
+```
+quickrun alias --cmd quickrun qr     # 现在 "qr" 可以在 PowerShell 中使用
+```
+
+单独的 `Set-Alias` 只在当前会话有效，所以 quickrun 会把带标记的
+`Set-Alias` 行写入你的 PowerShell 配置文件（PowerShell 7 和
+Windows PowerShell 5.1 都会写入），它们在每次启动 shell 时运行。
+在**新**终端窗口中生效。`quickrun del_alias qr` 可以再次移除它；
+`quickrun list` 会在单独的区块中显示终端别名。（不覆盖 cmd.exe——
+这是 PowerShell 功能。）
 
 ### Find：定位你不知道路径的 exe
 
@@ -145,8 +161,8 @@ Enter 继续，`A` 切换全部分类，`Q` 取消。
 | 命令 | 别名 | 选项 |
 |---|---|---|
 | `bind <exe> <alias>` | `b`, `-b`, `-bind` | `-a/--alias`（参数风格别名），`-f/--force` 覆盖已有项 |
-| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `-f/--force` 覆盖已有项 |
-| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | `-n/--dry-run`, `-f/--force` |
+| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `--cmd` 通过 PowerShell 配置文件创建终端别名，`-f/--force` 覆盖已有项 |
+| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | 同时移除 Win+R 和/或终端别名；`-n/--dry-run`, `-f/--force` |
 | `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` 同时移除非 quickrun 创建的条目 |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` 包含安装程序创建的用户条目 |
 | `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |

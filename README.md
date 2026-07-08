@@ -66,6 +66,7 @@ python quickrun.py <command> ...
 quickrun bind <path\to\app.exe> <alias>     # bind an alias
 quickrun -b <path\to\app.exe> -a <alias>    # same thing, flag style
 quickrun alias <old_cmd> <new_alias>        # alias an existing command
+quickrun alias --cmd <old_cmd> <new_alias>  # terminal alias (PowerShell) instead
 quickrun list                               # show your bindings
 quickrun unbind <alias>                     # remove one
 quickrun unbind all                         # remove all quickrun-managed bindings
@@ -97,6 +98,23 @@ quickrun del_alias ps
 `alias` resolves the old command through App Paths or PATH, then writes a
 new permanent user-level App Paths entry. It refuses to overwrite existing
 names unless you pass `--force`.
+
+### Terminal aliases: `alias --cmd`
+
+Win+R aliases don't work in a terminal (shells don't read App Paths).
+For that there's `--cmd`:
+
+```
+quickrun alias --cmd quickrun qr     # now "qr" works in PowerShell
+```
+
+A plain `Set-Alias` only lasts for the current session, so quickrun
+persists it by writing a tagged `Set-Alias` line into your PowerShell
+profile scripts (both PowerShell 7 and Windows PowerShell 5.1), which
+run at every shell startup. It takes effect in **new** terminal
+windows. `quickrun del_alias qr` removes it again; `quickrun list`
+shows terminal aliases in their own section. (cmd.exe is not covered —
+this is a PowerShell feature.)
 
 ### Find: locate an exe you don't know the path of
 
@@ -149,8 +167,8 @@ an area, Enter continues, `A` toggles all areas, and `Q` cancels.
 | Command | Aliases | Options |
 |---|---|---|
 | `bind <exe> <alias>` | `b`, `-b`, `-bind` | `-a/--alias` (flag-style alias), `-f/--force` overwrite existing |
-| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `-f/--force` overwrite existing |
-| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | `-n/--dry-run`, `-f/--force` |
+| `alias <old_cmd> <new_alias>` | `a`, `-alias`, `--alias` | `--cmd` terminal alias via PowerShell profile, `-f/--force` overwrite existing |
+| `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | removes Win+R and/or terminal aliases; `-n/--dry-run`, `-f/--force` |
 | `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` also remove entries quickrun didn't create |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` include installer-created user entries |
 | `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
