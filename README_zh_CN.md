@@ -66,6 +66,7 @@ quickrun bind <path\to\app.exe> <alias>     # 绑定一个别名
 quickrun -b <path\to\app.exe> -a <alias>    # 同样操作，参数风格
 quickrun list                               # 显示你的绑定
 quickrun unbind <alias>                     # 移除一个绑定
+quickrun find <name>                        # 在电脑上搜索 exe 并询问是否绑定
 quickrun quickstart                         # 自动检测已安装应用
 quickrun update                             # 从 GitHub 自更新（也可用：-U）
 quickrun --version                          # 打印版本号
@@ -78,6 +79,23 @@ quickrun bind "C:\Program Files (x86)\Microsoft Office\Root\Office16\WINWORD.EXE
 quickrun -b "D:\Tools\Everything\Everything.exe" -a ev
 quickrun bind "%LocalAppData%\Programs\obsidian\Obsidian.exe" notes
 ```
+
+### Find：定位你不知道路径的 exe
+
+```
+> quickrun find obsidian
+Searching for "obsidian" ...
+1 result(s) in 1.2s
+
+  Found: C:\Users\you\AppData\Local\Programs\obsidian\Obsidian.exe
+Alias to bind it to (press Enter to skip): notes
+[OK] Win+R -> "notes" now opens C:\Users\you\...\Obsidian.exe
+```
+
+`find` 会先查询注册表（App Paths + 安装程序记录），再对常见安装目录
+做限制深度、约 10 秒硬性时间预算的扫描——通常 1-3 秒内出结果。
+有多个匹配时会显示编号列表供选择；在任意提示处直接按 Enter 即跳过，
+不会绑定任何内容。
 
 ### Quickstart：自动检测已安装应用
 
@@ -109,6 +127,7 @@ Quickstart 会检测常见应用，并建议友好的别名：
 | `unbind <alias>` | `u`, `-u`, `-unbind` | `-f/--force` 同时移除非 quickrun 创建的条目 |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` 包含安装程序创建的用户条目 |
 | `quickstart` | `qs`, `-q`, `-quickstart` | `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `find <name>` | `f`, `-find`, `--find` | 交互式；按 Enter 跳过 |
 | `update` | `up`, `-U`, `--update` | （仅独立 exe 可用） |
 | `--version` | `-V` | |
 
@@ -136,6 +155,13 @@ quickrun 会在 **HKCU**（你的用户配置单元）下写入同类条目，�
 唯一可能让别名失效的情况是目标应用被移动或卸载；发生这种情况时重新绑定即可。
 
 **需要管理员权限吗？** 不需要。所有内容都是按用户保存的（HKCU）。
+
+**启动会经过 cmd.exe 吗？我看到有窗口一闪而过。**
+不会。Win+R 解析别名后直接启动目标 exe，中间没有任何 shell 参与。
+GUI 应用打开时完全不会出现控制台。只有两种情况会出现短暂的控制台窗口：
+别名指向的是一个*控制台*程序（那个窗口本身就是该程序），或者你在
+Win+R 中启动了 `quickrun` 本身（它是命令行工具；现在它会保持窗口
+打开，方便阅读帮助信息）。
 
 **别名可以覆盖内置名称吗？**
 可以。HKCU 优先于 HKLM，所以你确实可以让 `notepad` 在自己的账户下打开别的东西。
