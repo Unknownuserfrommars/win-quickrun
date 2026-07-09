@@ -19,7 +19,7 @@ if sys.platform != "win32":
 
 import winreg
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
@@ -571,11 +571,16 @@ QUICKSTART_APPS = [
 ]
 
 
-_CANCELLED = object()
+CUSTOM_ROW = ("custom", "Custom apps",
+              "type names yourself, e.g. telegram, obsidian, notion")
 
 
 def _quickstart_category_keys():
     return [key for key, _, _ in QUICKSTART_CATEGORIES]
+
+
+def _picker_rows():
+    return QUICKSTART_CATEGORIES + [CUSTOM_ROW]
 
 
 def _quickstart_apps(categories=None):
@@ -633,9 +638,9 @@ def _draw_quickstart_picker(index, selected, title) -> None:
     out.write(f'{_ANSI["bold"]}{_ANSI["cyan"]}quickrun quickstart{_ANSI["reset"]}\n')
     out.write(f"{title}\n\n")
     out.write("Space toggles, Up/Down moves, Enter continues, "
-              "A toggles all, Q cancels.\n\n")
+              "A toggles all areas, Q cancels.\n\n")
 
-    for i, (key, label, description) in enumerate(QUICKSTART_CATEGORIES):
+    for i, (key, label, description) in enumerate(_picker_rows()):
         active = i == index
         checked = key in selected
         cursor = ">" if active else " "
@@ -645,7 +650,7 @@ def _draw_quickstart_picker(index, selected, title) -> None:
         out.write(f"{color}{cursor} {tick}[{box}]{_ANSI['reset']} "
                   f"{label:<14} {description}{_ANSI['reset']}\n")
 
-    out.write(f"\n{_ANSI['yellow']}{len(selected)} area(s) selected"
+    out.write(f"\n{_ANSI['yellow']}{len(selected)} selected"
               f"{_ANSI['reset']}\n")
     out.flush()
 
@@ -654,7 +659,8 @@ def _select_quickstart_categories(initial=None, title="Select app areas"):
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.exit("[!] --ui needs an interactive console.")
 
-    selected = set(initial) if initial is not None else set(_quickstart_category_keys())
+    rows = _picker_rows()
+    selected = set(initial) if initial is not None else set()
     index = 0
     _enable_ansi()
     try:
@@ -662,18 +668,21 @@ def _select_quickstart_categories(initial=None, title="Select app areas"):
             _draw_quickstart_picker(index, selected, title)
             key = _read_key()
             if key == "up":
-                index = (index - 1) % len(QUICKSTART_CATEGORIES)
+                index = (index - 1) % len(rows)
             elif key == "down":
-                index = (index + 1) % len(QUICKSTART_CATEGORIES)
+                index = (index + 1) % len(rows)
             elif key == "space":
-                category = QUICKSTART_CATEGORIES[index][0]
-                if category in selected:
-                    selected.remove(category)
+                row_key = rows[index][0]
+                if row_key in selected:
+                    selected.remove(row_key)
                 else:
-                    selected.add(category)
+                    selected.add(row_key)
             elif key == "a":
                 all_keys = set(_quickstart_category_keys())
-                selected = set() if selected == all_keys else all_keys
+                if all_keys <= selected:
+                    selected -= all_keys
+                else:
+                    selected |= all_keys
             elif key == "enter":
                 return selected
             elif key in ("q", "\x1b"):
@@ -683,16 +692,6 @@ def _select_quickstart_categories(initial=None, title="Select app areas"):
     finally:
         sys.stdout.write(_ANSI["show"] + _ANSI["reset"] + "\n")
         sys.stdout.flush()
-
-
-def _selected_quickstart_categories(args, title):
-    initial = set(args.area) if args.area else None
-    if args.ui:
-        selected = _select_quickstart_categories(initial, title)
-        return _CANCELLED if selected is None else selected
-    if args.area:
-        return initial
-    return None
 
 
 def _build_quickstart_plan(args, categories=None):
@@ -715,25 +714,88 @@ def _build_quickstart_plan(args, categories=None):
     return plan, skipped
 
 
+def _split_apps(raw):
+    return [name.strip() for name in (raw or "").split(",") if name.strip()]
+
+
+def _find_custom_apps(names, args):
+    """Run a quick find for each user-typed app name."""
+    plan, skipped, missing = [], [], []
+    for name in names:
+        alias = _clean_alias(name)
+        if alias is None:
+            skipped.append((name, "not a valid alias name"))
+            continue
+        print(f'  looking for "{name}" ...')
+        exact, partial, _ = _find_candidates(name, budget=6.0)
+        hits = exact or partial
+        if not hits:
+            missing.append(name)
+            continue
+        existing, source = resolve_alias(alias)
+        if existing and not args.force:
+            if _is_managed(alias):
+                skipped.append((alias, "already bound by quickrun"))
+            else:
+                skipped.append((alias, f"already taken via {source}"))
+            continue
+        plan.append((alias, hits[0], name))
+    return plan, skipped, missing
+
+
 def cmd_quickstart(args) -> None:
-    categories = _selected_quickstart_categories(
-        args, "Select the app areas quickstart should scan."
-    )
-    if categories is _CANCELLED:
-        print("Cancelled.")
-        return
-    if categories == set():
-        print("No app areas selected.")
+    custom_apps = _split_apps(args.apps)
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+
+    if args.ui and not interactive:
+        sys.exit("[!] --ui needs an interactive console.")
+
+    categories = None  # None = scan every area
+    use_ui = interactive and not args.no_ui and not args.area
+    if use_ui:
+        selected = _select_quickstart_categories(
+            set(), "Select what quickstart should look for."
+        )
+        if selected is None:
+            print("Cancelled.")
+            return
+        if "custom" in selected:
+            selected.discard("custom")
+            try:
+                raw = input("Apps to look for (comma-separated, "
+                            "e.g. telegram, obsidian, notion): ")
+            except EOFError:
+                raw = ""
+            custom_apps += _split_apps(raw)
+        categories = selected
+    elif args.area:
+        categories = set(args.area)
+    elif custom_apps:
+        categories = set()  # --apps without --area: just the typed apps
+
+    if categories == set() and not custom_apps:
+        print("Nothing selected.")
         return
 
     print("Scanning for installed apps...\n")
     plan, skipped = _build_quickstart_plan(args, categories)
+    missing = []
+    if custom_apps:
+        custom_plan, custom_skipped, missing = _find_custom_apps(
+            custom_apps, args)
+        plan += custom_plan
+        skipped += custom_skipped
+        print()
 
     if plan:
         width = max(len(a) for a, _, _ in plan)
-        print("Will bind:")
+        print("Found - will bind:")
         for alias, exe, display in plan:
             print(f"  {alias:<{width}}  ->  {exe}")
+    if missing:
+        print("\nNot found: " + ", ".join(missing))
+        print("  (try the exe's real name, or a deeper interactive "
+              "search: quickrun find <name>)")
     if skipped:
         print("\nSkipped:")
         for alias, reason in skipped:
@@ -747,7 +809,8 @@ def cmd_quickstart(args) -> None:
         return
 
     if not args.yes:
-        answer = input(f"\nBind {len(plan)} alias(es)? [Y/n] ").strip().lower()
+        answer = input(f"\nBind the {len(plan)} alias(es) found? "
+                       "[Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):
             print("Cancelled.")
             return
@@ -1097,10 +1160,17 @@ def main() -> None:
     p_qs.add_argument("-f", "--force", action="store_true",
                       help="rebind aliases that already exist")
     p_qs.add_argument("--ui", action="store_true",
-                      help="choose app areas with an interactive UI")
+                      help="force the interactive picker (it is already the "
+                           "default in a console)")
+    p_qs.add_argument("--no-ui", action="store_true",
+                      help="skip the picker and scan every area")
     p_qs.add_argument("--area", action="append",
                       choices=_quickstart_category_keys(),
-                      help="limit quickstart to an app area; can repeat")
+                      help="limit quickstart to an app area; can repeat "
+                           "(implies --no-ui)")
+    p_qs.add_argument("--apps",
+                      help="extra apps to look for, comma-separated: "
+                           '--apps "telegram, obsidian, notion"')
     p_qs.set_defaults(func=cmd_quickstart)
 
     p_find = sub.add_parser(

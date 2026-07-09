@@ -137,11 +137,12 @@ prompt skips without binding.
 ### Quickstart: auto-detect installed apps
 
 ```
-quickrun quickstart            # scan, show the plan, ask before writing
-quickrun quickstart --ui       # pick app areas with Space + Up/Down
-quickrun quickstart --area coding --area work
+quickrun quickstart            # opens the interactive picker (in a console)
+quickrun quickstart --no-ui    # skip the picker, scan every area
+quickrun quickstart --area coding --area work      # scripted subset
+quickrun quickstart --apps "telegram, obsidian"    # look for your own apps
 quickrun quickstart --dry-run  # only show what would be bound
-quickrun quickstart --yes      # bind everything without asking
+quickrun quickstart --yes      # bind without asking
 ```
 
 Quickstart detects common apps and proposes friendly aliases:
@@ -159,8 +160,16 @@ Names that already mean something on your system (e.g. `excel` if
 Office registered it machine-wide) are skipped, never overwritten —
 unless you pass `--force`.
 
-`--ui` opens a small keyboard interface: Up/Down moves, Space toggles
-an area, Enter continues, `A` toggles all areas, and `Q` cancels.
+In a console, `quickstart` opens a small keyboard picker by default:
+Up/Down moves, Space toggles, Enter continues, `A` toggles all areas,
+`Q` cancels. Nothing is pre-selected — pick what you want. The last
+row, **Custom apps**, lets you type comma-separated names (e.g.
+`telegram, obsidian, notion`); each one gets a quick `find` pass, and
+found/not-found results are summarized before a single confirmation.
+
+`--no-ui` skips the picker and scans every area (this is also the
+automatic behavior when output is piped or scripted). `--area` and
+`--apps` also bypass the picker.
 
 ## Command reference
 
@@ -171,7 +180,7 @@ an area, Enter continues, `A` toggles all areas, and `Q` cancels.
 | `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | removes Win+R and/or terminal aliases; `-n/--dry-run`, `-f/--force` |
 | `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` also remove entries quickrun didn't create |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` include installer-created user entries |
-| `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `quickstart` | `qs`, `-q`, `-quickstart` | picker by default; `--no-ui`, `--area <area>`, `--apps "a, b"`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
 | `find <name>` | `f`, `-find`, `--find` | interactive; Enter skips |
 | `update` | `up`, `-U`, `--update` | (standalone exe only) |
 | `--version` | `-V` | |

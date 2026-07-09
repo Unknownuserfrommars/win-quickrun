@@ -132,11 +132,12 @@ Alias to bind it to (press Enter to skip): notes
 ### Quickstart：自动检测已安装应用
 
 ```
-quickrun quickstart            # 扫描，显示计划，写入前请求确认
-quickrun quickstart --ui       # 用 Space + Up/Down 选择应用分类
-quickrun quickstart --area coding --area work
+quickrun quickstart            # 打开交互式选择器（在控制台中）
+quickrun quickstart --no-ui    # 跳过选择器，扫描所有分类
+quickrun quickstart --area coding --area work      # 脚本化指定分类
+quickrun quickstart --apps "telegram, obsidian"    # 查找你自己指定的应用
 quickrun quickstart --dry-run  # 只显示将要绑定的内容
-quickrun quickstart --yes      # 不询问，直接绑定全部内容
+quickrun quickstart --yes      # 不询问，直接绑定
 ```
 
 Quickstart 会检测常见应用，并建议友好的别名：
@@ -153,8 +154,14 @@ Quickstart 会检测常见应用，并建议友好的别名：
 如果某个名称在你的系统中已经有含义（例如 Office 已经在机器范围内注册了
 `excel`），quickrun 会跳过它，绝不会覆盖，除非你传入 `--force`。
 
-`--ui` 会打开一个小型键盘界面：Up/Down 移动，Space 切换分类，
-Enter 继续，`A` 切换全部分类，`Q` 取消。
+在控制台中，`quickstart` 默认打开一个小型键盘选择器：Up/Down 移动，
+Space 切换，Enter 继续，`A` 切换全部分类，`Q` 取消。默认不预选任何
+分类——自己挑选想要的。最后一行 **Custom apps** 允许你输入逗号分隔的
+应用名（例如 `telegram, obsidian, notion`）；每个都会做一次快速
+`find` 搜索，找到/未找到的结果会汇总后只需确认一次。
+
+`--no-ui` 跳过选择器并扫描所有分类（输出被管道或脚本调用时也会
+自动采用此行为）。`--area` 和 `--apps` 同样会跳过选择器。
 
 ## 命令参考
 
@@ -165,7 +172,7 @@ Enter 继续，`A` 切换全部分类，`Q` 取消。
 | `del_alias <alias>` | `da`, `-del_alias`, `--del_alias` | 同时移除 Win+R 和/或终端别名；`-n/--dry-run`, `-f/--force` |
 | `unbind <alias>` / `unbind all` | `u`, `-u`, `-unbind` | `-n/--dry-run`, `-y/--yes`, `-f/--force` 同时移除非 quickrun 创建的条目 |
 | `list` | `l`, `ls`, `-l`, `-list` | `--all` 包含安装程序创建的用户条目 |
-| `quickstart` | `qs`, `-q`, `-quickstart` | `--ui`, `--area <area>`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
+| `quickstart` | `qs`, `-q`, `-quickstart` | 默认打开选择器；`--no-ui`, `--area <area>`, `--apps "a, b"`, `-y/--yes`, `-n/--dry-run`, `-f/--force` |
 | `find <name>` | `f`, `-find`, `--find` | 交互式；按 Enter 跳过 |
 | `update` | `up`, `-U`, `--update` | （仅独立 exe 可用） |
 | `--version` | `-V` | |
