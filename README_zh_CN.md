@@ -106,8 +106,9 @@ quickrun alias --cmd quickrun qr     # 现在 "qr" 可以在 PowerShell 中使�
 ```
 
 单独的 `Set-Alias` 只在当前会话有效，所以 quickrun 会把带标记的
-`Set-Alias` 行写入你的 PowerShell 配置文件（PowerShell 7 和
-Windows PowerShell 5.1 都会写入），它们在每次启动 shell 时运行。
+`Set-Alias` 行写入你的 PowerShell 配置文件，它们在每次启动 shell 时
+运行。PowerShell 7 和 Windows PowerShell 5.1 都装了就都会写入，
+并且只会为你确实安装了的 shell 创建配置文件。
 在**新**终端窗口中生效。`quickrun del_alias qr` 可以再次移除它；
 `quickrun list` 会在单独的区块中显示终端别名。（不覆盖 cmd.exe——
 这是 PowerShell 功能。）

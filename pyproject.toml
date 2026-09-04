@@ -1,6 +1,6 @@
 [project]
 name = "quickrun"
-version = "0.6.0"
+version = "0.6.1"
 description = "Bind custom Win+R aliases to any Windows program"
 requires-python = ">=3.9"
 
@@ -13,3 +13,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["quickrun"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -8,6 +8,7 @@ marker value so it never deletes bindings it didn't create.
 """
 
 import argparse
+import codecs
 import os
 import re
 import shutil
@@ -19,7 +20,7 @@ if sys.platform != "win32":
 
 import winreg
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 GITHUB_REPO = "Unknownuserfrommars/quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
@@ -241,20 +242,43 @@ def _documents_dir() -> str:
     return os.path.expandvars(r"%UserProfile%\Documents")
 
 
+def _profile_targets():
+    """(profile.ps1, shell exe) for Windows PowerShell 5.1 and PowerShell 7+."""
+    docs = _documents_dir()
+    return [(os.path.join(docs, "WindowsPowerShell", "profile.ps1"), "powershell"),
+            (os.path.join(docs, "PowerShell", "profile.ps1"), "pwsh")]
+
+
 def _profile_paths():
     """profile.ps1 for both Windows PowerShell 5.1 and PowerShell 7+."""
-    docs = _documents_dir()
-    return [os.path.join(docs, "WindowsPowerShell", "profile.ps1"),
-            os.path.join(docs, "PowerShell", "profile.ps1")]
+    return [path for path, _ in _profile_targets()]
+
+
+def _profile_encoding(data: bytes):
+    """Return the encoding a profile's BOM names, or None if it has none."""
+    if data.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if data.startswith(codecs.BOM_UTF16_LE) or data.startswith(codecs.BOM_UTF16_BE):
+        return "utf-16"
+    # PowerShell 5.1 can leave a BOM-less UTF-16 profile behind. Its ASCII
+    # is every other byte NUL, which is valid UTF-8 and would otherwise
+    # decode to mojibake that we then write back over the real profile.
+    if b"\x00" in data[:64]:
+        return "utf-16-le" if data[1:2] == b"\x00" else "utf-16-be"
+    return None
 
 
 def _read_profile(path):
     with open(path, "rb") as f:
         data = f.read()
-    for encoding in ("utf-8-sig", "mbcs"):
+    # A BOM is authoritative - never fall back past it, or a decode that
+    # merely *succeeds* (cp1252 happily reads UTF-16 as mojibake) would
+    # corrupt the file on write.
+    declared = _profile_encoding(data)
+    for encoding in [declared] if declared else ["utf-8", "mbcs"]:
         try:
             return data.decode(encoding), encoding
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, LookupError):
             continue
     sys.exit(f"[!] Could not decode {path}; edit it manually.")
 
@@ -272,26 +296,47 @@ def _profile_aliases(path):
     return found
 
 
+def _dominant_newline(text: str) -> str:
+    crlf = text.count("\r\n")
+    return "\n" if text.count("\n") - crlf > crlf else "\r\n"
+
+
+def _keep_lines(text: str, alias: str):
+    """Existing lines minus this alias, each with its own ending intact."""
+    return [l for l in text.splitlines(keepends=True)
+            if not _is_alias_line(l, alias)]
+
+
 def _is_alias_line(line: str, alias: str) -> bool:
     match = _PROFILE_LINE.match(line)
     return bool(match) and match.group(1).lower() == alias
 
 
-def _add_cmd_alias(alias: str, value: str) -> None:
+def _add_cmd_alias(alias: str, value: str):
+    """Write the Set-Alias line; return the profiles it landed in."""
     quoted = value.replace("'", "''")
     line = f"Set-Alias -Name {alias} -Value '{quoted}' {PROFILE_MARK}"
-    for path in _profile_paths():
+    written = []
+    for path, shell in _profile_targets():
         if os.path.isfile(path):
             text, encoding = _read_profile(path)
-            lines = [l for l in text.splitlines()
-                     if not _is_alias_line(l, alias)]
-            lines.append(line)
-            content = "\n".join(lines) + "\n"
-        else:
+            eol = _dominant_newline(text)
+            lines = _keep_lines(text, alias)
+            if lines and not lines[-1].endswith(("\n", "\r")):
+                lines[-1] += eol
+            lines.append(line + eol)
+            content = "".join(lines)
+        elif shutil.which(shell):
+            # Only create a profile for a shell that is actually installed.
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            content, encoding = line + "\n", "utf-8-sig"
-        with open(path, "w", encoding=encoding) as f:
+            content, encoding = line + "\r\n", "utf-8-sig"
+        else:
+            continue
+        # newline="" so we never rewrite line endings we did not author.
+        with open(path, "w", encoding=encoding, newline="") as f:
             f.write(content)
+        written.append(path)
+    return written
 
 
 def _remove_cmd_alias(alias: str):
@@ -301,10 +346,9 @@ def _remove_cmd_alias(alias: str):
         if alias not in _profile_aliases(path):
             continue
         text, encoding = _read_profile(path)
-        lines = [l for l in text.splitlines() if not _is_alias_line(l, alias)]
-        content = "\n".join(lines)
-        with open(path, "w", encoding=encoding) as f:
-            f.write(content + "\n" if content else "")
+        content = "".join(_keep_lines(text, alias))
+        with open(path, "w", encoding=encoding, newline="") as f:
+            f.write(content)
         removed.append(path)
     return removed
 
@@ -336,10 +380,15 @@ def cmd_alias(args) -> None:
         if _cmd_alias_exists(new_alias) and not args.force:
             sys.exit(f'[!] Terminal alias "{new_alias}" already exists. '
                      "Use --force to replace it.")
-        _add_cmd_alias(new_alias, value)
-        print(f'[OK] Terminal alias "{new_alias}" -> {value} added to your '
-              "PowerShell profiles.\n     Takes effect in NEW terminal "
-              "windows (or run: . $PROFILE)")
+        written = _add_cmd_alias(new_alias, value)
+        if not written:
+            sys.exit("[!] Found no PowerShell profile to write to, and "
+                     "neither powershell nor pwsh is on PATH.")
+        print(f'[OK] Terminal alias "{new_alias}" -> {value} added to:')
+        for path in written:
+            print(f"       {path}")
+        print("     Takes effect in NEW terminal windows "
+              "(or run: . $PROFILE)")
         return
 
     target, source = _resolve_command_target(args.old_cmd)
@@ -739,7 +788,15 @@ def _find_custom_apps(names, args):
             else:
                 skipped.append((alias, f"already taken via {source}"))
             continue
-        plan.append((alias, hits[0], name))
+        if len(hits) > 1 and sys.stdin.isatty() and sys.stdout.isatty():
+            print(f'  several matches for "{name}":')
+            chosen = _choose_path(hits[:10], indent="    ")
+            if chosen is None:
+                skipped.append((alias, "no candidate chosen"))
+                continue
+        else:
+            chosen = hits[0]
+        plan.append((alias, chosen, name))
     return plan, skipped, missing
 
 
@@ -751,10 +808,11 @@ def cmd_quickstart(args) -> None:
         sys.exit("[!] --ui needs an interactive console.")
 
     categories = None  # None = scan every area
-    use_ui = interactive and not args.no_ui and not args.area
+    use_ui = args.ui or (interactive and not args.no_ui and not args.area)
     if use_ui:
         selected = _select_quickstart_categories(
-            set(), "Select what quickstart should look for."
+            set(args.area) if args.area else set(),
+            "Select what quickstart should look for."
         )
         if selected is None:
             print("Cancelled.")
@@ -935,6 +993,25 @@ def _find_candidates(query: str, budget: float = 10.0):
     return exact, partial, False
 
 
+def _choose_path(hits, indent="  "):
+    """Ask which candidate exe to use; None if the user cancels."""
+    for i, path in enumerate(hits, 1):
+        print(f"{indent}[{i}] {path}")
+    try:
+        answer = input(f"\nWhich one? [1-{len(hits)}, Enter to cancel] ").strip()
+    except EOFError:
+        answer = ""
+    if not answer:
+        return None
+    try:
+        index = int(answer)
+        if index < 1:
+            raise IndexError
+        return hits[index - 1]
+    except (ValueError, IndexError):
+        sys.exit(f'[!] "{answer}" is not a number between 1 and {len(hits)}.')
+
+
 def cmd_find(args) -> None:
     query = args.name.strip()
     if not query:
@@ -958,19 +1035,10 @@ def cmd_find(args) -> None:
         chosen = hits[0]
         print(f"  Found: {chosen}")
     else:
-        for i, path in enumerate(hits, 1):
-            print(f"  [{i}] {path}")
-        try:
-            answer = input(f"\nWhich one? [1-{len(hits)}, Enter to cancel] ").strip()
-        except EOFError:
-            answer = ""
-        if not answer:
+        chosen = _choose_path(hits)
+        if chosen is None:
             print("Cancelled.")
             return
-        try:
-            chosen = hits[int(answer) - 1]
-        except (ValueError, IndexError):
-            sys.exit(f'[!] "{answer}" is not a number between 1 and {len(hits)}.')
 
     while True:
         try:
@@ -1011,6 +1079,7 @@ def cmd_update(args) -> None:
         sys.exit("[!] update only works for the standalone quickrun.exe.\n"
                  "    Running from source? Use: git pull")
 
+    import hashlib
     import json
     import urllib.request
 
@@ -1038,14 +1107,36 @@ def cmd_update(args) -> None:
     exe = sys.executable
     print(f"Updating {__version__} -> {latest.lstrip('v')} ...")
     tmp = exe + ".new"
+    digest, size = hashlib.sha256(), 0
     try:
         with fetch(asset["browser_download_url"], timeout=120) as resp, \
                 open(tmp, "wb") as out:
-            shutil.copyfileobj(resp, out)
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                size += len(chunk)
+                out.write(chunk)
     except OSError as exc:
         if os.path.exists(tmp):
             os.remove(tmp)
         sys.exit(f"[!] Download failed: {exc}")
+
+    # A truncated or tampered download must never replace a working exe.
+    expected_size = asset.get("size")
+    expected_hash = (asset.get("digest") or "").partition("sha256:")[2].lower()
+    problem = None
+    if expected_size and size != expected_size:
+        problem = f"expected {expected_size} bytes, got {size}"
+    elif expected_hash and digest.hexdigest() != expected_hash:
+        problem = "sha256 does not match the release digest"
+    if problem:
+        os.remove(tmp)
+        sys.exit(f"[!] Download verification failed ({problem}). "
+                 "Your current quickrun.exe is untouched.")
+    if not expected_hash:
+        print("    (release publishes no sha256; verified size only)")
 
     old = exe + ".old"
     if os.path.exists(old):
@@ -1159,15 +1250,17 @@ def main() -> None:
                       help="only show what would be bound")
     p_qs.add_argument("-f", "--force", action="store_true",
                       help="rebind aliases that already exist")
-    p_qs.add_argument("--ui", action="store_true",
-                      help="force the interactive picker (it is already the "
-                           "default in a console)")
-    p_qs.add_argument("--no-ui", action="store_true",
-                      help="skip the picker and scan every area")
+    p_qs_ui = p_qs.add_mutually_exclusive_group()
+    p_qs_ui.add_argument("--ui", action="store_true",
+                         help="force the interactive picker (it is already "
+                              "the default in a console); with --area, opens "
+                              "the picker with those areas preselected")
+    p_qs_ui.add_argument("--no-ui", action="store_true",
+                         help="skip the picker and scan every area")
     p_qs.add_argument("--area", action="append",
                       choices=_quickstart_category_keys(),
                       help="limit quickstart to an app area; can repeat "
-                           "(implies --no-ui)")
+                           "(skips the picker unless --ui is given)")
     p_qs.add_argument("--apps",
                       help="extra apps to look for, comma-separated: "
                            '--apps "telegram, obsidian, notion"')

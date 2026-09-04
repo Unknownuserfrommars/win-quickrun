@@ -110,8 +110,9 @@ quickrun alias --cmd quickrun qr     # now "qr" works in PowerShell
 
 A plain `Set-Alias` only lasts for the current session, so quickrun
 persists it by writing a tagged `Set-Alias` line into your PowerShell
-profile scripts (both PowerShell 7 and Windows PowerShell 5.1), which
-run at every shell startup. It takes effect in **new** terminal
+profile scripts, which run at every shell startup. It writes to both
+PowerShell 7 and Windows PowerShell 5.1 when both are installed, and
+only creates a profile for a shell you actually have. It takes effect in **new** terminal
 windows. `quickrun del_alias qr` removes it again; `quickrun list`
 shows terminal aliases in their own section. (cmd.exe is not covered —
 this is a PowerShell feature.)
