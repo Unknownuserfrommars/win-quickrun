@@ -1,8 +1,16 @@
 # quickrun
 
+[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/quickrun)](https://github.com/Unknownuserfrommars/quickrun/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/quickrun/total)](https://github.com/Unknownuserfrommars/quickrun/releases)
+[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/quickrun)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
+![No admin required](https://img.shields.io/badge/admin-not%20required-brightgreen)
+
 [简体中文](README_zh_CN.md)
 
 **Bind custom Win+R aliases to any Windows program.**
+
+![quickrun demo: Win+R can't find "word", one quickrun bind command later it opens Word](docs/demo.gif)
 
 Windows lets you launch `notepad` or `powershell` straight from
 Win+R, but not third-party apps — typing `word` does nothing, even

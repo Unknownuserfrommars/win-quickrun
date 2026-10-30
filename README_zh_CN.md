@@ -1,8 +1,16 @@
 # quickrun
 
+[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/quickrun)](https://github.com/Unknownuserfrommars/quickrun/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/quickrun/total)](https://github.com/Unknownuserfrommars/quickrun/releases)
+[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/quickrun)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
+![No admin required](https://img.shields.io/badge/admin-not%20required-brightgreen)
+
 [English](README.md)
 
 **为任意 Windows 程序绑定自定义 Win+R 别名。**
+
+![quickrun 演示：Win+R 找不到 "word"，执行一条 quickrun bind 命令后即可打开 Word](docs/demo.gif)
 
 Windows 允许你直接从 Win+R 启动 `notepad` 或 `powershell`，
 但第三方应用通常不行。输入 `word` 没有反应，尽管 `winword`
