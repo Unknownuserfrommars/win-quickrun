@@ -1,0 +1,25 @@
+name: Publish to WinGet
+
+# Opens a PR at microsoft/winget-pkgs for every published release.
+# Needs: the package already accepted in winget-pkgs once, a fork of
+# microsoft/winget-pkgs on this account, and a classic PAT
+# (public_repo + workflow scopes) stored as the WINGET_TOKEN secret.
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v0.6.1)
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: Unknownuserfrommars.quickrun
+          installers-regex: 'quickrun\.exe$'
+          release-tag: ${{ inputs.tag || github.event.release.tag_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
