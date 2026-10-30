@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
 
 PackageIdentifier: Unknownuserfrommars.win-quickrun
 PackageVersion: 0.6.1
@@ -27,4 +27,4 @@ Tags:
 - win-r
 ReleaseNotesUrl: https://github.com/Unknownuserfrommars/win-quickrun/releases/tag/v0.6.1
 ManifestType: defaultLocale
-ManifestVersion: 1.10.0
+ManifestVersion: 1.12.0

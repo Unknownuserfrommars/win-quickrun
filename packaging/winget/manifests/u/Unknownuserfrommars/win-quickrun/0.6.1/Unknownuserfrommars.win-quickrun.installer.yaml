@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: Unknownuserfrommars.win-quickrun
 PackageVersion: 0.6.1
@@ -12,4 +12,4 @@ Installers:
   InstallerUrl: https://github.com/Unknownuserfrommars/win-quickrun/releases/download/v0.6.1/quickrun.exe
   InstallerSha256: EF7ADBBCA577B55A1B49B2394412EFD8503342F9FB558140B610D4B709A6883C
 ManifestType: installer
-ManifestVersion: 1.10.0
+ManifestVersion: 1.12.0
