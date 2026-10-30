@@ -21,7 +21,7 @@ if sys.platform != "win32":
 import winreg
 
 __version__ = "0.6.1"
-GITHUB_REPO = "Unknownuserfrommars/quickrun"
+GITHUB_REPO = "Unknownuserfrommars/win-quickrun"
 
 APP_PATHS = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
 MARKER = "QuickRunManaged"

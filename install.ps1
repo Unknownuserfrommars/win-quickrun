@@ -1,14 +1,14 @@
 # quickrun installer.
 #
 # From the web (no clone needed):
-#   irm https://raw.githubusercontent.com/Unknownuserfrommars/quickrun/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Unknownuserfrommars/win-quickrun/main/install.ps1 | iex
 #
 # From a local clone:
 #   .\install.ps1                 # per-user (recommended, no admin needed)
 #   .\install.ps1 -SystemWide     # C:\Program Files + machine PATH (needs admin)
 param([switch]$SystemWide)
 $ErrorActionPreference = "Stop"
-$repo = "Unknownuserfrommars/quickrun"
+$repo = "Unknownuserfrommars/win-quickrun"
 
 if ($SystemWide) {
     $principal = [Security.Principal.WindowsPrincipal]::new(

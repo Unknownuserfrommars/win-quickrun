@@ -16,10 +16,16 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
+      - name: Skip until WINGET_TOKEN is configured
+        if: env.WINGET_TOKEN == ''
+        run: echo "::notice::WINGET_TOKEN secret not set - skipping winget publish."
       - uses: vedantmgoyal9/winget-releaser@main
+        if: env.WINGET_TOKEN != ''
         with:
-          identifier: Unknownuserfrommars.quickrun
+          identifier: Unknownuserfrommars.win-quickrun
           installers-regex: 'quickrun\.exe$'
           release-tag: ${{ inputs.tag || github.event.release.tag_name }}
           token: ${{ secrets.WINGET_TOKEN }}

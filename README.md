@@ -1,14 +1,15 @@
-# quickrun
+# win-quickrun
 
-[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/quickrun)](https://github.com/Unknownuserfrommars/quickrun/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/quickrun/total)](https://github.com/Unknownuserfrommars/quickrun/releases)
-[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/quickrun)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/win-quickrun)](https://github.com/Unknownuserfrommars/win-quickrun/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/win-quickrun/total)](https://github.com/Unknownuserfrommars/win-quickrun/releases)
+[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/win-quickrun)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 ![No admin required](https://img.shields.io/badge/admin-not%20required-brightgreen)
 
 [简体中文](README_zh_CN.md)
 
-**Bind custom Win+R aliases to any Windows program.**
+**Bind custom Win+R aliases to any Windows program.** The command is
+`quickrun`.
 
 ![quickrun demo: Win+R can't find "word", one quickrun bind command later it opens Word](docs/demo.gif)
 
@@ -36,7 +37,7 @@ Then **Win+R → `word` → Enter**. That's it.
 Paste into any PowerShell window:
 
 ```powershell
-irm https://raw.githubusercontent.com/Unknownuserfrommars/quickrun/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Unknownuserfrommars/win-quickrun/main/install.ps1 | iex
 ```
 
 This downloads the latest release exe to

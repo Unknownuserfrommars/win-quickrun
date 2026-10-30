@@ -1,14 +1,14 @@
-# quickrun
+# win-quickrun
 
-[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/quickrun)](https://github.com/Unknownuserfrommars/quickrun/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/quickrun/total)](https://github.com/Unknownuserfrommars/quickrun/releases)
-[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/quickrun)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Unknownuserfrommars/win-quickrun)](https://github.com/Unknownuserfrommars/win-quickrun/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Unknownuserfrommars/win-quickrun/total)](https://github.com/Unknownuserfrommars/win-quickrun/releases)
+[![License: MIT](https://img.shields.io/github/license/Unknownuserfrommars/win-quickrun)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 ![No admin required](https://img.shields.io/badge/admin-not%20required-brightgreen)
 
 [English](README.md)
 
-**为任意 Windows 程序绑定自定义 Win+R 别名。**
+**为任意 Windows 程序绑定自定义 Win+R 别名。** 命令名为 `quickrun`。
 
 ![quickrun 演示：Win+R 找不到 "word"，执行一条 quickrun bind 命令后即可打开 Word](docs/demo.gif)
 
@@ -35,7 +35,7 @@ quickrun -b "C:\...\WINWORD.EXE" -a word
 粘贴到任意 PowerShell 窗口：
 
 ```powershell
-irm https://raw.githubusercontent.com/Unknownuserfrommars/quickrun/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Unknownuserfrommars/win-quickrun/main/install.ps1 | iex
 ```
 
 这会将最新发布版 exe 下载到
